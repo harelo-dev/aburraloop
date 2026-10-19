@@ -28,9 +28,9 @@ Un día de despachos de última milla con pago contra entrega (COD) en los 10 mu
 
 ## Dónde van las vans
 
-La ubicación se escoge una vez por día y se puede cambiar en la interfaz:
+La ubicación se escoge una vez por día y se puede cambiar en la interfaz. Una **distancia mínima van → CEDI** (10 minutos por defecto, entre 0 y 20) vale para las tres estrategias: una van pegada al CEDI no intercepta nada que el CEDI no reciba igual, así que esas celdas quedan fuera. Con CEDI Sur, por ejemplo, la van única va al norte y no al sur.
 
-- **Fijas por zona:** Norte (Bello), Centro (Medellín) y Sur (Itagüí), según cuántas vans haya.
+- **Fijas por zona:** Norte (Bello), Centro (Medellín) y Sur (Itagüí), según cuántas vans haya. Si un ancla queda demasiado cerca del CEDI se descarta, y esa van se ubica donde indica el historial.
 - **Según concentración de fallos (por defecto):** cobertura máxima voraz. Cada van se pone en la celda que alcanza, dentro del tiempo máximo, el mayor valor esperado de rescate que no cubre otra van. El valor esperado de un fallo es la probabilidad de que el segundo intento funcione por lo que recupera. La concentración sale del promedio de **10 días simulados previos**, distintos del día evaluado, como si fuera el historial de la operación.
 - **Con conocimiento del día (techo):** el mismo algoritmo, alimentado con los fallos del propio día. No se puede lograr en la práctica y sirve solo como cota superior de lo que da una buena ubicación.
 
@@ -55,6 +55,10 @@ Dos archivos, generados una sola vez con el servidor demo público de OSRM (perf
 - `src/data/cell-minutes.json`: minutos por carretera entre **cada par de celdas** (443 × 443), redondeados al minuto. Se genera con `npm run build:cellmatrix` y es lo que permite poner una van en cualquier celda. Los 138 pares sin ruta se tratan como inalcanzables. Los tiempos no son simétricos porque hay calles de un solo sentido.
 
 Limitaciones: es tiempo de carro sin tráfico por hora del día, y las motos suelen ser más rápidas en trancón. Las líneas rojas del mapa son rectas y solo ilustran el viaje de retorno; el flete ahorrado sí usa la distancia por carretera.
+
+## Limitación conocida: el margen se cuenta completo
+
+Cada paquete rescatado suma su flete ahorrado y el margen completo del producto (28% o 12% del COD). Pero un paquete que vuelve al CEDI no siempre pierde esa venta: puede reofrecerse al día siguiente. Por eso el modelo probablemente sobrestima el valor de rescatar paquetes cerca del CEDI, y la distancia mínima es un parche para eso. Lo más correcto sería atribuir solo la parte del margen que realmente se pierde al volver, y la ganancia de entregar el mismo día. Es un parámetro que falta.
 
 ## Lo que el modelo no hace todavía
 

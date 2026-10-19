@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { breakEvenVolume, marginalVolume, meanOver, sensitivity, vansCurve, type VolumePoint } from '../src/sim/analysis'
+import travel from '../src/data/travel.json'
 import { defaultParams, greedyPlacement, nearestCell, simulate } from '../src/sim/simulate'
 
 const pts = (rows: [number, number[]][]): VolumePoint[] => rows.map(([volume, net]) => ({ volume, failed: 0, net }))
@@ -38,6 +39,23 @@ describe('van placement', () => {
     const a = simulate({ ...defaultParams, seed: 1 }).vans.map((v) => v.cell)
     const b = simulate({ ...defaultParams, seed: 99 }).vans.map((v) => v.cell)
     expect(a).toEqual(b)
+  })
+})
+
+describe('minimum distance to the CEDI', () => {
+  const minutesToCedi = (cedi: string, cell: number) => travel.cells[cell].min[travel.origins.indexOf(`cedi:${cedi}`)]
+  it('keeps every van at least minCediMinutes from the CEDI, for every strategy', () => {
+    for (const cedi of ['sur', 'centro', 'gir'] as const) {
+      for (const placement of ['zones', 'concentration', 'hindsight'] as const) {
+        const r = simulate({ ...defaultParams, cedi, vans: 3, placement, minCediMinutes: 10 })
+        expect(r.vans).toHaveLength(3)
+        r.vans.forEach((v) => expect(minutesToCedi(cedi, v.cell)).toBeGreaterThanOrEqual(10))
+      }
+    }
+  })
+  it('with no limit, a van can sit next to the CEDI', () => {
+    const r = simulate({ ...defaultParams, cedi: 'centro', vans: 1, placement: 'zones', minCediMinutes: 0 })
+    expect(minutesToCedi('centro', r.vans[0].cell)).toBeLessThan(10)
   })
 })
 

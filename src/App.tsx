@@ -74,6 +74,8 @@ export function App() {
           <h2 className="sep">Supuestos que tú ajustas</h2>
           <Slider id="mins" label="Tiempo máx. van → paquete" value={p.maxMinutes} min={10} max={45} step={5} out={`${p.maxMinutes} min`} onChange={(v) => set('maxMinutes', v)} />
           <p className="hint tight">La zona verde del mapa es lo que cada van alcanza por carretera en ese tiempo.</p>
+          <Slider id="minCedi" label="Distancia mínima van → CEDI" value={p.minCediMinutes} min={0} max={20} step={5} out={p.minCediMinutes ? `${p.minCediMinutes} min` : 'sin límite'} onChange={(v) => set('minCediMinutes', v)} />
+          <p className="hint tight">Una van pegada al CEDI no intercepta nada que el CEDI no reciba igual. La zona gris del mapa no admite vans.</p>
           <Slider id="p2" label="Éxito del 2.º intento (Grado A)" value={Math.round(p.secondAttemptSuccess * 100)} min={30} max={90} step={5} out={`${Math.round(p.secondAttemptSuccess * 100)}%`} onChange={(v) => set('secondAttemptSuccess', v / 100)} />
           <button className="reroll" onClick={() => set('seed', (p.seed * 31 + 11) % 100000)}>Simular otro día</button>
         </aside>
@@ -93,6 +95,7 @@ export function App() {
               <span><i style={{ background: 'var(--loss)' }} />Retorno forzoso al CEDI</span>
               <span><i className="line" style={{ background: 'var(--loss)', opacity: 0.5 }} />Viaje de peso muerto (línea recta, ilustrativa)</span>
               <span><i className="sq" />Zona que alcanzan las vans</span>
+              <span><i className="sq gray" />Sin vans: demasiado cerca del CEDI</span>
             </div>
           </div>
 
@@ -119,6 +122,7 @@ export function App() {
               <div>Costo por van/día: <b>{cop(ASSUMPTIONS.vanCostCopPerDay)}</b></div>
               <div>Capacidad por van: <b>{ASSUMPTIONS.vanCapacity} paquetes/día</b></div>
               <div>Tiempos de viaje: <b>{travel.cells.length} celdas de ~1 km, OSRM (carro)</b></div>
+              <div>Van a ≥ <b>{p.minCediMinutes ? `${p.minCediMinutes} min` : '0 (sin límite)'}</b> del CEDI</div>
               <div>Ubicación de vans: <b>{p.placement === 'zones' ? 'fija por zona' : p.placement === 'concentration' ? 'según fallos de 10 días previos' : 'según los fallos del día (techo)'}</b></div>
             </div>
           </div>

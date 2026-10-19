@@ -19,6 +19,8 @@ export interface Params {
   vans: 0 | 1 | 2 | 3
   maxMinutes: number // max road time van -> package
   secondAttemptSuccess: number // Grade A, 0..1
+  /** A van must sit at least this many road minutes from the CEDI: next to it, it intercepts nothing the CEDI would not receive anyway. */
+  minCediMinutes: number
   placement: Placement
   seed: number
 }
@@ -177,16 +179,18 @@ function expectedValue(q: Incident, p: Params, a: Assumptions) {
 
 /**
  * Greedy maximum coverage: each new van goes where it reaches the most not-yet-covered expected value
- * within maxMinutes. Ties go to the cell with the lowest weighted travel time.
+ * within maxMinutes. Ties go to the cell with the lowest weighted travel time. `allowed` limits the
+ * candidate cells and `initial` are vans already placed (returned first).
  */
-export function greedyPlacement(count: number, weight: number[], maxMinutes: number): number[] {
-  const chosen: number[] = []
+export function greedyPlacement(count: number, weight: number[], maxMinutes: number, allowed?: boolean[], initial: number[] = []): number[] {
+  const chosen = [...initial]
   const covered = new Array<boolean>(N).fill(false)
-  for (let k = 0; k < count; k++) {
+  for (const c of chosen) for (let j = 0; j < N; j++) if (MINUTES[c][j] <= maxMinutes) covered[j] = true
+  while (chosen.length < count) {
     let best = -1
     let bestScore = -Infinity
     for (let c = 0; c < N; c++) {
-      if (chosen.includes(c)) continue
+      if (chosen.includes(c) || (allowed && !allowed[c])) continue
       let gain = 0
       let time = 0
       const row = MINUTES[c]
@@ -205,6 +209,13 @@ export function greedyPlacement(count: number, weight: number[], maxMinutes: num
   return chosen
 }
 
+/** Cells where a van may sit: far enough from the CEDI. If none qualifies the rule is dropped. */
+export function allowedCells(p: Pick<Params, 'cedi' | 'minCediMinutes'>): boolean[] {
+  const idx = travel.origins.indexOf(`cedi:${p.cedi}`)
+  const ok = CELLS.map((c) => c.min[idx] >= p.minCediMinutes)
+  return ok.some(Boolean) ? ok : ok.map(() => true)
+}
+
 const weightsFrom = (incidents: Incident[], p: Params, a: Assumptions) => {
   const w = new Array<number>(N).fill(0)
   for (const q of incidents) w[q.cell] += expectedValue(q, p, a)
@@ -213,32 +224,47 @@ const weightsFrom = (incidents: Incident[], p: Params, a: Assumptions) => {
 
 const trainingCache = new Map<string, number[]>()
 
-function trainingPlacement(p: Params, a: Assumptions): number[] {
-  const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, p.maxMinutes, p.vans, a])
+/** Expected recovered value per cell, averaged over previous simulated days (the operation's "history"). */
+function trainingWeights(p: Params, a: Assumptions): number[] {
+  const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, a])
   const hit = trainingCache.get(key)
   if (hit) return hit
   const w = new Array<number>(N).fill(0)
   for (let d = 0; d < TRAINING_DAYS; d++) {
-    const day = generateIncidents(p, a, TRAINING_SEED + d)
-    const dw = weightsFrom(day, p, a)
+    const dw = weightsFrom(generateIncidents(p, a, TRAINING_SEED + d), p, a)
     for (let j = 0; j < N; j++) w[j] += dw[j] / TRAINING_DAYS
   }
-  const cells = greedyPlacement(p.vans, w, p.maxMinutes)
   if (trainingCache.size > 400) trainingCache.clear()
-  trainingCache.set(key, cells)
+  trainingCache.set(key, w)
+  return w
+}
+
+const placementCache = new Map<string, number[]>()
+
+function cached(key: string, build: () => number[]) {
+  const hit = placementCache.get(key)
+  if (hit) return hit
+  const cells = build()
+  if (placementCache.size > 400) placementCache.clear()
+  placementCache.set(key, cells)
   return cells
 }
 
 export function vanCells(p: Params, a: Assumptions, incidents: Incident[]): number[] {
   if (p.vans === 0) return []
+  const allowed = allowedCells(p)
+  if (p.placement === 'hindsight') return greedyPlacement(p.vans, weightsFrom(incidents, p, a), p.maxMinutes, allowed)
   if (p.placement === 'zones') {
-    return ZONE_ANCHORS[p.vans].map((id) => {
-      const an = places.vanAnchors.find((v) => v.id === id)!
-      return nearestCell(an.lat, an.lon)
-    })
+    const anchors = ZONE_ANCHORS[p.vans]
+      .map((id) => places.vanAnchors.find((v) => v.id === id)!)
+      .map((an) => nearestCell(an.lat, an.lon))
+      .filter((c) => allowed[c])
+    // Anchors too close to the CEDI are dropped; the remaining vans go where the history says.
+    return cached(JSON.stringify(['z', p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.maxMinutes, a]),
+      () => greedyPlacement(p.vans, trainingWeights(p, a), p.maxMinutes, allowed, anchors))
   }
-  if (p.placement === 'hindsight') return greedyPlacement(p.vans, weightsFrom(incidents, p, a), p.maxMinutes)
-  return trainingPlacement(p, a)
+  return cached(JSON.stringify(['c', p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.maxMinutes, a]),
+    () => greedyPlacement(p.vans, trainingWeights(p, a), p.maxMinutes, allowed))
 }
 
 export function simulate(p: Params, a: Assumptions = ASSUMPTIONS): Result {
@@ -286,5 +312,5 @@ export function simulate(p: Params, a: Assumptions = ASSUMPTIONS): Result {
 
 export const defaultParams: Params = {
   cedi: 'centro', volume: 600, fleet: 24, failureRate: 0.15, vans: 2, maxMinutes: 25,
-  secondAttemptSuccess: 0.6, placement: 'concentration', seed: 7,
+  secondAttemptSuccess: 0.6, minCediMinutes: 10, placement: 'concentration', seed: 7,
 }

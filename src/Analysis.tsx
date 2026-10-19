@@ -136,7 +136,7 @@ export function Analysis({ params }: { params: Params }) {
           </div>
           <p className="take">
             Poner las vans donde se concentraron los fallos de días anteriores da <b>{copSigned(conc.mean.net - zones.mean.net)}</b> al día frente a zonas fijas, y queda a {copSigned(hind.mean.net - conc.mean.net)} del techo con conocimiento del día.
-            La regla: cada van va donde alcanza, en {deferred.maxMinutes} min por carretera, el mayor valor esperado que aún no cubre otra.
+            La regla: cada van va donde alcanza, en {deferred.maxMinutes} min por carretera, el mayor valor esperado que aún no cubre otra{deferred.minCediMinutes ? `, y a al menos ${deferred.minCediMinutes} min del CEDI` : ''}.
           </p>
         </div>
 

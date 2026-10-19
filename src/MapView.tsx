@@ -14,16 +14,18 @@ const point = (lon: number, lat: number, props: Record<string, unknown> = {}) =>
 function build(result: Result, params: Params) {
   const cedi = places.cedis.find((c) => c.id === params.cedi)!
   const h = travel.step / 2
-  const reach = travel.cells
-    .filter((_, i) => result.vans.some((v) => minutesBetween(v.cell, i) <= params.maxMinutes))
-    .map((c) => ({
-      type: 'Feature' as const, properties: {},
-      geometry: { type: 'Polygon' as const, coordinates: [[[c.lon - h, c.lat - h], [c.lon + h, c.lat - h], [c.lon + h, c.lat + h], [c.lon - h, c.lat + h], [c.lon - h, c.lat - h]]] },
-    }))
+  const cediIdx = travel.origins.indexOf(`cedi:${params.cedi}`)
+  const square = (c: { lat: number; lon: number }) => ({
+    type: 'Feature' as const, properties: {},
+    geometry: { type: 'Polygon' as const, coordinates: [[[c.lon - h, c.lat - h], [c.lon + h, c.lat - h], [c.lon + h, c.lat + h], [c.lon - h, c.lat + h], [c.lon - h, c.lat - h]]] },
+  })
+  const blocked = params.vans > 0 ? travel.cells.filter((c) => c.min[cediIdx] < params.minCediMinutes).map(square) : []
+  const reach = travel.cells.filter((_, i) => result.vans.some((v) => minutesBetween(v.cell, i) <= params.maxMinutes)).map(square)
   const lines = result.incidents.filter((q) => !q.saved).slice(0, MAX_LINES).map((q) => ({
     type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: [[q.lon, q.lat], [cedi.lon, cedi.lat]] },
   }))
   return {
+    blocked: { type: 'FeatureCollection' as const, features: blocked },
     reach: { type: 'FeatureCollection' as const, features: reach },
     lines: { type: 'FeatureCollection' as const, features: lines },
     incidents: { type: 'FeatureCollection' as const, features: result.incidents.map((q) => point(q.lon, q.lat, { saved: q.saved })) },
@@ -43,7 +45,7 @@ export function MapView({ result, params }: { result: Result; params: Params }) 
     const m = map.current
     if (!m || !ready.current) return
     const d = build(latest.current.result, latest.current.params)
-    for (const k of ['reach', 'lines', 'incidents', 'vans', 'cedi'] as const) (m.getSource(k) as GeoJSONSource).setData(d[k])
+    for (const k of ['blocked', 'reach', 'lines', 'incidents', 'vans', 'cedi'] as const) (m.getSource(k) as GeoJSONSource).setData(d[k])
   }
 
   useEffect(() => {
@@ -52,7 +54,8 @@ export function MapView({ result, params }: { result: Result; params: Params }) 
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     m.on('load', () => {
       const empty = { type: 'FeatureCollection' as const, features: [] }
-      for (const k of ['reach', 'lines', 'incidents', 'vans', 'cedi']) m.addSource(k, { type: 'geojson', data: empty })
+      for (const k of ['blocked', 'reach', 'lines', 'incidents', 'vans', 'cedi']) m.addSource(k, { type: 'geojson', data: empty })
+      m.addLayer({ id: 'blocked', type: 'fill', source: 'blocked', paint: { 'fill-color': '#12201d', 'fill-opacity': 0.16, 'fill-outline-color': 'rgba(0,0,0,0)' } })
       m.addLayer({ id: 'reach', type: 'fill', source: 'reach', paint: { 'fill-color': '#0b7a6b', 'fill-opacity': 0.14, 'fill-outline-color': 'rgba(0,0,0,0)' } })
       m.addLayer({ id: 'lines', type: 'line', source: 'lines', paint: { 'line-color': '#c9382c', 'line-opacity': 0.3, 'line-width': 1 } })
       m.addLayer({
