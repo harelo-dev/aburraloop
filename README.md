@@ -7,7 +7,7 @@ Compara dos modelos:
 - **Tradicional:** los paquetes fallidos vuelven como peso muerto al CEDI.
 - **Nodos móviles de triaje:** mini-vans pivote interceptan la novedad en la calle y re-despachan el mismo día.
 
-**Demo:** _(se agrega al desplegar)_
+**Demo:** https://harelo-dev.github.io/aburraloop/
 
 ![Captura](docs/screenshot.png)
 
