@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Analysis, OBJECTIVE_LABEL } from './Analysis'
 import { MapView } from './MapView'
-import { ASSUMPTIONS, defaultParams, simulate, type Objective, type Params, type Placement } from './sim/simulate'
+import { ASSUMPTIONS, defaultParams, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
 import { cop, dec } from './format'
 import travel from './data/travel.json'
 
@@ -64,6 +64,19 @@ export function App() {
             <p className="hint">0 = modelo tradicional.</p>
           </div>
           <div className="ctl">
+            <label htmlFor="mode">Cómo opera la van</label>
+            <select id="mode" value={p.mode} disabled={p.vans === 0} onChange={(e) => set('mode', e.target.value as Mode)}>
+              <option value="intercept">Intercepta fallos en la calle</option>
+              <option value="rounds">Recorre a las motos (AM y PM) y es el punto de cierre</option>
+            </select>
+            {p.mode === 'rounds' && (
+              <label className="check" htmlFor="skip">
+                <input id="skip" type="checkbox" checked={p.skipEmptyVisits} onChange={(e) => set('skipEmptyVisits', e.target.checked)} />
+                Visitar solo a las motos con algo pendiente
+              </label>
+            )}
+          </div>
+          <div className="ctl">
             <label htmlFor="placement">Dónde van las vans</label>
             <select id="placement" value={p.placement} disabled={p.vans === 0} onChange={(e) => set('placement', e.target.value as Placement)}>
               <option value="history">Según fallos de días previos</option>
@@ -73,12 +86,12 @@ export function App() {
           </div>
           <div className="ctl">
             <label htmlFor="objective">Criterio de ubicación</label>
-            <select id="objective" value={p.objective} disabled={p.vans === 0} onChange={(e) => set('objective', e.target.value as Objective)}>
+            <select id="objective" value={p.objective} disabled={p.vans === 0 || p.mode === 'rounds'} onChange={(e) => set('objective', e.target.value as Objective)}>
               {(['value', 'density', 'reach'] as const).map((o) => <option key={o} value={o}>{OBJECTIVE_LABEL[o]}</option>)}
             </select>
           </div>
           <h2 className="sep">Supuestos que tú ajustas</h2>
-          <Slider id="mins" label="Tiempo máx. van → paquete" value={p.maxMinutes} min={10} max={45} step={5} out={`${p.maxMinutes} min`} onChange={(v) => set('maxMinutes', v)} />
+          <Slider id="mins" label={p.mode === 'rounds' ? 'Tiempo máx. van ↔ moto' : 'Tiempo máx. van → paquete'} value={p.maxMinutes} min={10} max={45} step={5} out={`${p.maxMinutes} min`} onChange={(v) => set('maxMinutes', v)} />
           <p className="hint tight">La zona verde del mapa es lo que cada van alcanza por carretera en ese tiempo.</p>
           <Slider id="minCedi" label="Distancia mínima van → CEDI" value={p.minCediMinutes} min={0} max={20} step={5} out={p.minCediMinutes ? `${p.minCediMinutes} min` : 'sin límite'} onChange={(v) => set('minCediMinutes', v)} />
           <p className="hint tight">Una van pegada al CEDI no intercepta nada que el CEDI no reciba igual. La zona gris del mapa no admite vans.</p>
@@ -93,8 +106,8 @@ export function App() {
         <section className="main">
           <div className="kpis" aria-live="polite">
             <div className="kpi"><div className="k">Retorno físico evitado</div><div className="v good">{pct.toFixed(0)}%</div><div className="s">{r.saved} de {r.failed} fallidos</div></div>
-            <div className="kpi"><div className="k">Capital recuperado / día</div><div className={`v ${net >= 0 ? 'good' : 'bad'}`}>{cop(r.recovered)}</div><div className="s">{p.vans ? `neto de vans y desvíos: ${net < 0 ? '−' : ''}${cop(Math.abs(net))}` : 'sin vans no hay rescate'}</div></div>
-            <div className="kpi"><div className="k">Costo de las vans / día</div><div className="v">{cop(r.vanCost)}</div><div className="s">{p.vans} × {cop(ASSUMPTIONS.vanCostCopPerDay)} · desvíos {cop(r.detourCost)}</div></div>
+            <div className="kpi"><div className="k">Capital recuperado / día</div><div className={`v ${net >= 0 ? 'good' : 'bad'}`}>{cop(r.recovered)}</div><div className="s">{p.vans ? `${p.mode === 'rounds' ? `neto, con ahorro de cierre ${cop(r.tripSaving)}` : 'neto de vans y desvíos'}: ${net < 0 ? '−' : ''}${cop(Math.abs(net))}` : 'sin vans no hay rescate'}</div></div>
+            <div className="kpi"><div className="k">Costo de las vans / día</div><div className="v">{cop(r.vanCost)}</div><div className="s">{p.vans} × {cop(ASSUMPTIONS.vanCostCopPerDay)}{p.mode === 'rounds' ? ` · visitas ${r.visits.done}/${r.visits.done + r.visits.skipped}` : ` · desvíos ${cop(r.detourCost)}`}</div></div>
             <div className="kpi"><div className="k">Peso muerto por moto</div><div className="v">{dec(r.deadWeightWithVans)}</div><div className="s">antes {dec(r.deadWeightTraditional)} pq/moto</div></div>
           </div>
 
@@ -103,7 +116,9 @@ export function App() {
             <div className="legend">
               <span><i style={{ background: 'var(--accent)' }} />Salvado en calle</span>
               <span><i style={{ background: 'var(--loss)' }} />Retorno forzoso al CEDI</span>
-              <span><i className="line" style={{ background: 'var(--loss)', opacity: 0.5 }} />Viaje de peso muerto (línea recta, ilustrativa)</span>
+              {p.mode === 'rounds'
+                ? <span><i className="ring" />Moto (centro de su zona)</span>
+                : <span><i className="line" style={{ background: 'var(--loss)', opacity: 0.5 }} />Viaje de peso muerto (línea recta, ilustrativa)</span>}
               <span><i className="sq" />Zona que alcanzan las vans</span>
               <span><i className="sq gray" />Sin vans: demasiado cerca del CEDI</span>
             </div>
@@ -133,6 +148,8 @@ export function App() {
               <div>Costo por van/día: <b>{cop(ASSUMPTIONS.vanCostCopPerDay)}</b></div>
               <div>Capacidad por van: <b>{ASSUMPTIONS.vanCapacity} paquetes/día</b></div>
               <div>Tiempos de viaje: <b>{travel.cells.length} celdas de ~1 km, OSRM (carro)</b></div>
+              <div>Operación: <b>{p.mode === 'rounds' ? `la van visita a cada moto a las ${ASSUMPTIONS.amWindow[0]}–${ASSUMPTIONS.amWindow[1]} y ${ASSUMPTIONS.pmWindow[0]}–${ASSUMPTIONS.pmWindow[1]} h, ${ASSUMPTIONS.handoffMinutes} min por visita` : 'intercepta fallos dentro de su alcance'}</b></div>
+              <div>Reintento: <b>éxito pleno si llega a la van antes de las {ASSUMPTIONS.attemptFullUntil} h, nulo desde las {ASSUMPTIONS.attemptNoneFrom} h</b></div>
               <div>Van a ≥ <b>{p.minCediMinutes ? `${p.minCediMinutes} min` : '0 (sin límite)'}</b> del CEDI</div>
               <div>Ubicación de vans: <b>{p.placement === 'zones' ? 'fija por zona' : p.placement === 'history' ? 'según fallos de 10 días previos' : 'según los fallos del día (techo)'} · {OBJECTIVE_LABEL[p.objective].toLowerCase()}</b></div>
             </div>

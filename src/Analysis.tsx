@@ -1,6 +1,6 @@
 import { useDeferredValue, useMemo } from 'react'
 import {
-  ANALYSIS_DAYS, VOLUME_POINTS, breakEvenVolume, marginalVolume, placementComparison, sensitivity, vansCurve, volumeCurve,
+  ANALYSIS_DAYS, VOLUME_POINTS, breakEvenVolume, marginalVolume, modeComparison, placementComparison, sensitivity, vansCurve, volumeCurve,
   type PlacementRow, type VolumePoint,
 } from './sim/analysis'
 import { ASSUMPTIONS, type Objective, type Params } from './sim/simulate'
@@ -11,9 +11,10 @@ export const OBJECTIVE_LABEL: Record<Objective, string> = {
   value: 'Mayor valor neto',
   density: 'Concentración de paquetes',
 }
-const rowLabel = (id: PlacementRow['id'], objective: Objective) =>
-  id === 'zones' ? 'Fijas por zona (Norte, Centro, Sur)'
-    : id === 'hindsight' ? `Con conocimiento del día (techo) · ${OBJECTIVE_LABEL[objective].toLowerCase()}`
+const rowLabel = (id: PlacementRow['id'], objective: Objective, rounds: boolean) =>
+  rounds && id === 'history-density' ? 'Historial · concentración de motos'
+    : id === 'zones' ? 'Fijas por zona (Norte, Centro, Sur)'
+    : id === 'hindsight' ? `Con conocimiento del día (techo)${rounds ? '' : ` · ${OBJECTIVE_LABEL[objective].toLowerCase()}`}`
       : `Historial · ${OBJECTIVE_LABEL[id.slice(8) as Objective].toLowerCase()}`
 const lc = (t: string) => t.charAt(0).toLowerCase() + t.slice(1)
 const SERIES_COLORS = ['var(--c1)', 'var(--c2)', 'var(--c3)']
@@ -63,6 +64,7 @@ export function Analysis({ params }: { params: Params }) {
   const curve = useMemo(() => vansCurve(base), [base])
   const volume = useMemo(() => volumeCurve(base), [base])
   const placements = useMemo(() => placementComparison(base), [base])
+  const modes = useMemo(() => modeComparison(base), [base])
   const sens = useMemo(() => sensitivity(base), [base])
 
   const bestN = curve.reduce((b, m, i) => (m.net > curve[b].net ? i : b), 0)
@@ -72,12 +74,13 @@ export function Analysis({ params }: { params: Params }) {
   const maxAbs = Math.max(...sens.rows.flatMap((r) => [Math.abs(r.lowDelta), Math.abs(r.highDelta)]), 1)
   const rowFor = (id: PlacementRow['id']) => placements.find((r) => r.id === id)!
   const zones = rowFor('zones'), hind = rowFor('hindsight')
-  const hist = (['reach', 'value', 'density'] as const).map((o) => rowFor(`history-${o}`))
-  const histNow = rowFor(`history-${deferred.objective}`)
-  const selectedId: PlacementRow['id'] = deferred.placement === 'zones' ? 'zones' : deferred.placement === 'hindsight' ? 'hindsight' : `history-${deferred.objective}`
+  const rounds = deferred.mode === 'rounds'
+  const hist = (['reach', 'value', 'density'] as const).map((o) => placements.find((r) => r.id === `history-${o}`))
+  const histNow = rounds ? rowFor('history-density') : rowFor(`history-${deferred.objective}`)
+  const selectedId: PlacementRow['id'] = deferred.placement === 'zones' ? 'zones' : deferred.placement === 'hindsight' ? 'hindsight' : rounds ? 'history-density' : `history-${deferred.objective}`
   const be = [0, 1, 2].map((s) => breakEvenVolume(volume, s))
   const m2 = marginalVolume(volume, 1), m3 = marginalVolume(volume, 2)
-  const fmtV = (v: number | null) => (v === null ? 'nunca en 150–1.200' : `~${Math.round(v / 10) * 10}`)
+  const fmtV = (v: number | null) => (v === null ? '' : `~${Math.round(v / 10) * 10}`)
 
   return (
     <section className="analysis" aria-label="Análisis" data-stale={stale}>
@@ -87,6 +90,26 @@ export function Analysis({ params }: { params: Params }) {
       </div>
 
       <div className="an-grid">
+        <div className="panel wide">
+          <h3>¿Intercepta o recorre?</h3>
+          <div className="mode-row head"><span>Vans</span><span>Intercepta en la calle</span><span>Recorre AM y PM</span><span>Recorre, solo con pendientes</span></div>
+          {modes.map((m) => {
+            const best = Math.max(m.intercept.net, m.rounds.net, m.roundsPending.net)
+            const cell = (mean: typeof m.intercept) => (
+              <span className={`n ${mean.net === best ? 'win' : ''}`}>{copSigned(mean.net)} · {mean.savedPct.toFixed(0)}%</span>
+            )
+            return (
+              <div className="mode-row" key={m.vans}>
+                <span>{m.vans} van{m.vans === 1 ? '' : 's'}</span>
+                {cell(m.intercept)}{cell(m.rounds)}{cell(m.roundsPending)}
+              </div>
+            )
+          })}
+          <p className="take">
+            Neto por día y % de fallos salvados, en negrita el mejor de cada fila. Intercepta recibe el fallo apenas ocurre, pero la moto se desvía hacia la van. Recorre ahorra ese desvío y el regreso al CEDI al cierre ({copSigned(modes[1].rounds.tripSaving)} al día con 2 vans), pero entrega el paquete a la van más tarde, y un reintento tardío funciona menos. Además una van no alcanza a visitar a todas las motos en la ventana: con pocas vans y muchas motos, algunas se quedan sin visita.
+          </p>
+        </div>
+
         <div className="panel">
           <h3>¿Cuántas vans conviene?</h3>
           <div className="cmp">
@@ -112,12 +135,13 @@ export function Analysis({ params }: { params: Params }) {
           <VolumeChart points={volume} current={deferred.volume} />
           <ul className="take list">
             {[0, 1, 2].map((s) => (
-              <li key={s}><i style={{ background: SERIES_COLORS[s] }} />{s + 1} van{s ? 's' : ''} se pagan desde <b>{fmtV(be[s])}</b> despachos al día</li>
+              <li key={s}><i style={{ background: SERIES_COLORS[s] }} />{s + 1} van{s ? 's' : ''}: {be[s] === null ? <>no se pagan con 150 a 1.200 despachos al día</> : <>se pagan desde <b>{fmtV(be[s])}</b> despachos al día</>}</li>
             ))}
           </ul>
           <p className="take">
-            La 2.ª van supera a la 1.ª desde <b>{fmtV(m2)}</b> despachos al día y la 3.ª supera a la 2.ª desde <b>{fmtV(m3)}</b>, con {Math.round(deferred.failureRate * 100)}% de novedad.
-            Por debajo de ese volumen, lo que rescata la van adicional no cubre su costo.
+            {m2 === null ? <>La 2.ª van no supera a la 1.ª con 150 a 1.200 despachos al día</> : <>La 2.ª van supera a la 1.ª desde <b>{fmtV(m2)}</b> despachos al día</>}
+            {' '}y {m3 === null ? <>la 3.ª no supera a la 2.ª en ese rango</> : <>la 3.ª supera a la 2.ª desde <b>{fmtV(m3)}</b></>}, con {Math.round(deferred.failureRate * 100)}% de novedad.
+            {(m2 !== null || m3 !== null) && ' Por debajo de ese volumen, lo que rescata la van adicional no cubre su costo.'}
           </p>
         </div>
 
@@ -129,7 +153,7 @@ export function Analysis({ params }: { params: Params }) {
               <tbody>
                 {placements.map((r) => (
                   <tr key={r.id} className={r.id === selectedId ? 'sel' : ''}>
-                    <td>{rowLabel(r.id, deferred.objective)}</td>
+                    <td>{rowLabel(r.id, deferred.objective, deferred.mode === 'rounds')}</td>
                     <td>{r.mean.savedPct.toFixed(0)}%</td>
                     <td>{copSigned(r.mean.net)}</td>
                     <td>{r.sites.join(', ')}</td>
@@ -138,16 +162,31 @@ export function Analysis({ params }: { params: Params }) {
               </tbody>
             </table>
           </div>
-          <p className="take">
-            Frente a zonas fijas, ubicar por historial da <b>{copSigned(hist[0].mean.net - zones.mean.net)}</b> al día con mayor alcance, <b>{copSigned(hist[1].mean.net - zones.mean.net)}</b> con mayor valor neto y <b>{copSigned(hist[2].mean.net - zones.mean.net)}</b> con concentración de paquetes.
-            Conocer el día de antemano sumaría {copSigned(hind.mean.net - histNow.mean.net)} sobre el criterio elegido.
-          </p>
-          <ul className="take list plain">
-            <li><b>Mayor alcance:</b> cada van va donde cubre más valor que ninguna otra cubre ya.</li>
-            <li><b>Mayor valor neto:</b> suma la capacidad de la van ({ASSUMPTIONS.vanCapacity} paquetes) y el desvío de la moto, que cuesta ${deferred.detourCopPerMin} por minuto.</li>
-            <li><b>Concentración:</b> minimiza el tiempo total de carretera hasta los paquetes, contando paquetes y no pesos. Un paquete que ninguna van alcanza cuenta como el doble del alcance ({deferred.maxMinutes} min): mientras queden paquetes fuera de alcance, la van nueva va hacia ellos, y solo cuando todo se alcanza se parte el núcleo denso.</li>
-            {deferred.minCediMinutes > 0 && <li>Ninguna van queda a menos de {deferred.minCediMinutes} min del CEDI.</li>}
-          </ul>
+          {rounds ? (
+            <>
+              <p className="take">
+                Frente a zonas fijas, ubicar por historial da <b>{copSigned(histNow.mean.net - zones.mean.net)}</b> al día.
+                Conocer el día de antemano sumaría {copSigned(hind.mean.net - histNow.mean.net)}.
+              </p>
+              <ul className="take list plain">
+                <li>En recorridos, las vans se ubican donde se concentran las motos (mismo criterio de concentración), porque ahí empieza cada ronda y ahí cierran las motos.</li>
+                {deferred.minCediMinutes > 0 && <li>Ninguna van queda a menos de {deferred.minCediMinutes} min del CEDI.</li>}
+              </ul>
+            </>
+          ) : (
+            <>
+              <p className="take">
+                Frente a zonas fijas, ubicar por historial da <b>{copSigned(hist[0]!.mean.net - zones.mean.net)}</b> al día con mayor alcance, <b>{copSigned(hist[1]!.mean.net - zones.mean.net)}</b> con mayor valor neto y <b>{copSigned(hist[2]!.mean.net - zones.mean.net)}</b> con concentración de paquetes.
+                Conocer el día de antemano sumaría {copSigned(hind.mean.net - histNow.mean.net)} sobre el criterio elegido.
+              </p>
+              <ul className="take list plain">
+                <li><b>Mayor alcance:</b> cada van va donde cubre más valor que ninguna otra cubre ya.</li>
+                <li><b>Mayor valor neto:</b> suma la capacidad de la van ({ASSUMPTIONS.vanCapacity} paquetes) y el desvío de la moto, que cuesta ${deferred.detourCopPerMin} por minuto.</li>
+                <li><b>Concentración:</b> minimiza el tiempo total de carretera hasta los paquetes, contando paquetes y no pesos. Un paquete que ninguna van alcanza cuenta como el doble del alcance ({deferred.maxMinutes} min): mientras queden paquetes fuera de alcance, la van nueva va hacia ellos, y solo cuando todo se alcanza se parte el núcleo denso.</li>
+                {deferred.minCediMinutes > 0 && <li>Ninguna van queda a menos de {deferred.minCediMinutes} min del CEDI.</li>}
+              </ul>
+            </>
+          )}
         </div>
 
         <div className="panel">

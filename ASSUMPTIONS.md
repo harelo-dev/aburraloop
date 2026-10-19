@@ -10,7 +10,7 @@ Un día de despachos de última milla con pago contra entrega (COD) en los 10 mu
 2. Cada paquete fallido se ubica en un municipio según su peso comercial, con dispersión gaussiana alrededor de su centro (σ entre 1,5 y 3,5 km), y se ajusta a la celda de ~1 km más cercana de la matriz de viaje.
 3. Cada fallo recibe una hora (08:00–16:30), un valor COD ($85k–$150k) y un grado de potencial de triaje.
 4. Una mini-van intercepta un paquete si el **tiempo por carretera** desde su ubicación es menor o igual al máximo configurado, el grado es A o B y la van no superó su capacidad del día. Si varias vans alcanzan el paquete, va la más cercana que aún tenga capacidad. Los paquetes se atienden en orden de hora.
-5. Un paquete interceptado se salva con cierta probabilidad. Si no se salva, vuelve al CEDI igual.
+5. Un paquete entregado a la van se salva con cierta probabilidad, que baja si llega tarde (ver más abajo). Si no se salva, vuelve al CEDI igual.
 
 ## Parámetros
 
@@ -20,6 +20,7 @@ Un día de despachos de última milla con pago contra entrega (COD) en los 10 mu
 | Mezcla de fallos | 45% Grado A, 25% Grado B, 30% Grado C | `ASSUMPTIONS.gradeShare` |
 | Éxito 2.º intento, Grado A | 60% (slider 30–90%) | UI |
 | Éxito liquidación flash, Grado B | 80% | `ASSUMPTIONS.gradeBSuccess` |
+| Hora límite del reintento | éxito pleno hasta las 12:00, nulo desde las 17:00, lineal en medio | `attemptFullUntil`, `attemptNoneFrom` |
 | Margen del producto | 28% del COD (A), 12% (B) | `marginA`, `marginB` |
 | Parte del margen que se pierde si vuelve al CEDI | 50% (slider 10–100%) | UI |
 | Flete ahorrado | $900 por km, ida y vuelta al CEDI, más $4.000 de manejo | `freightCopPerKm`, `handlingCop` |
@@ -32,7 +33,21 @@ Un día de despachos de última milla con pago contra entrega (COD) en los 10 mu
 
 Cada paquete salvado suma el flete ahorrado ($900 por km de carretera hasta el CEDI, ida y vuelta, más $4.000 de manejo) y **solo la parte del margen que de verdad se pierde al volver al CEDI**. Un paquete devuelto puede reofrecerse al día siguiente, así que contar el margen completo sobrestimaría el rescate. Con el valor por defecto de 50%, cada rescate suma la mitad del margen.
 
-El **neto** es lo recuperado menos el costo de las vans menos el **costo de desvío**: cada paquete entregado a una van obliga a la moto a ir hasta ella y volver a su ruta, y ese tiempo cuesta ($300 por minuto, ida y vuelta, se usa el tiempo de carretera entre el paquete y la van). Así, acercar las vans a la concentración de paquetes tiene un valor en el modelo.
+**La hora importa.** Un paquete que llega a la van a las 9:00 se reintenta con las probabilidades de siempre (60% en Grado A, 80% en Grado B). Uno que llega a las 14:30 tiene la mitad, y uno que llega a las 17:00 ya no tiene reintento posible ese día. Esta regla es igual en los dos modos de operación, para que la comparación sea justa.
+
+El **neto** es lo recuperado, más el ahorro al cierre (solo en recorridos), menos el costo de las vans y menos el costo de los desvíos (solo en intercepción).
+
+## Cómo opera la van
+
+**Intercepta fallos en la calle.** La van está en una celda. Cuando una moto tiene un fallo dentro del alcance, va hasta la van con el paquete y vuelve a su ruta. Ese desvío cuesta $300 por minuto, ida y vuelta (se usa el tiempo de carretera entre el paquete y la van). La entrega a la van es inmediata.
+
+**Recorre a las motos (AM y PM) y es el punto de cierre.** Las motos tienen cada una una zona de trabajo fija, repartidas por municipio según su peso en los envíos. Cada moto pertenece a la van más cercana dentro del alcance. La van visita a cada una de las suyas, la más cercana primero, una vez en la ventana de la mañana (9:00 a 12:00) y otra en la de la tarde (13:00 a 16:00), con 6 minutos por visita. Las motos que no alcanza a visitar antes de que cierre la ventana esperan a la siguiente ronda. Cada fallo se entrega a la van en la primera visita posterior; los que ocurren después de la visita de la tarde se entregan al cierre.
+
+- Los paquetes entregados en una ronda pueden reintentarse ese día, con el éxito que baja según la hora de la visita y hasta la capacidad de la van (80 paquetes). Los entregados al cierre no tienen reintento.
+- Al cierre, cada moto que tuvo fallos va a la van y no al CEDI, y se ahorra la diferencia de tiempo, a $300 por minuto. **Es un supuesto fuerte:** supone que sin paquetes fallidos la moto no necesita pasar por el CEDI al cierre.
+- La opción "visitar solo a las motos con algo pendiente" quita las visitas vacías y deja tiempo para otras. Por defecto la van visita a todas, como en la propuesta original.
+- Las vans de este modo se ubican donde se concentran las motos (concentración, con historial o con conocimiento del día).
+- Los fallos de Grado C se entregan a la van pero no se reintentan.
 
 ## Dónde van las vans
 
@@ -44,7 +59,7 @@ La ubicación se escoge una vez por día. Se combinan dos decisiones en la inter
 - **Fijas por zona:** Norte (Bello), Centro (Medellín) y Sur (Itagüí), según cuántas vans haya. Si un ancla queda demasiado cerca del CEDI se descarta, y esa van se ubica donde indica el historial y el criterio elegido.
 - **Con conocimiento del día (techo):** los fallos del propio día. No se puede lograr en la práctica y sirve como cota de lo que da una buena ubicación.
 
-**Con qué criterio** (algoritmos voraces: agregan una van a la vez)
+**Con qué criterio** (algoritmos voraces: agregan una van a la vez; solo en modo intercepta)
 
 - **Mayor alcance:** cada van va donde cubre, dentro del tiempo máximo, el mayor valor esperado que ninguna otra cubre ya. Tiende a mandar la 2.ª van lejos del núcleo.
 - **Mayor valor neto (por defecto):** modela el día con la capacidad de cada van (80 paquetes) y el desvío de la moto, y pone cada van donde sube más el neto total.
@@ -52,23 +67,52 @@ La ubicación se escoge una vez por día. Se combinan dos decisiones en la inter
 
 Una **distancia mínima van → CEDI** (10 minutos por defecto, entre 0 y 20) vale para todas las combinaciones: una van pegada al CEDI no intercepta nada que el CEDI no reciba igual, así que esas celdas quedan fuera. Con CEDI Sur, por ejemplo, la van única va al norte y no al sur.
 
-El valor esperado de un fallo es la probabilidad de que el segundo intento funcione por lo que recupera. Los fallos son proporcionales a los despachos de cada municipio, así que la concentración de fallos sigue la de las entregas.
+El valor esperado de un fallo es la probabilidad de que el segundo intento funcione, por la hora de llegada, por lo que recupera. Los fallos son proporcionales a los despachos de cada municipio, así que la concentración de fallos sigue la de las entregas.
 
-### Qué encontramos al comparar
+## Qué encontramos al comparar
 
-Con 2 vans, 6 días simulados, CEDI Centro y los parámetros por defecto, probamos **todos los pares posibles** de celdas contra los algoritmos voraces:
+### Dónde poner la 2.ª van (modo intercepta)
 
-| Escenario | Mejor par posible | Mejor par solo en el núcleo | Voraz (valor neto) |
-| --- | --- | --- | --- |
-| 600 despachos, 15% | Medellín + Girardota, $533 k | Medellín + Bello, $436 k | $522 k |
-| 900 despachos, 15% | Medellín + Girardota, $1,17 M | Envigado + Bello, $967 k | $1,16 M |
-| 1.200 despachos, 25% | Medellín + Girardota, $2,38 M | Envigado + Bello, $2,18 M | $2,40 M |
+Con 2 vans, 6 días simulados y CEDI Centro, probamos **todos los pares posibles** de celdas contra los algoritmos voraces:
 
-- La mejor 2.ª van **no** se queda en el núcleo denso. La van de Medellín, con 25 minutos de alcance, ya cubre casi todo el núcleo y todavía le sobra capacidad. La segunda van rinde más alcanzando el norte (Bello, Copacabana, Girardota y Barbosa suman 24% de los envíos), que de otro modo vuelve entero al CEDI.
-- Partir el núcleo en dos cuesta entre $100 y $200 mil netos por día en estos escenarios.
-- Cambia con el alcance: con **15 minutos**, la 2.ª van sí parte el núcleo (Medellín + Sabaneta con el criterio de concentración), porque la primera ya no cubre todo.
-- El algoritmo de valor neto queda a menos de 2% del mejor par en estos tres casos. El de mayor alcance queda 20% o más por debajo.
-- Subir el costo del desvío no cambia esa conclusión: a $600 por minuto o más, ni siquiera una van se paga con 600 despachos.
+| Escenario | Mejor par posible | Mejor par solo en el núcleo | Voraz (valor neto) | Voraz (alcance) |
+| --- | --- | --- | --- | --- |
+| 600 despachos, 15% | Medellín + Girardota, $40 k | Envigado + Bello, −$7 k | $27 k | −$57 k |
+| 900 despachos, 15% | Medellín + Girardota, $437 k | Envigado + Bello, $328 k | $429 k | $309 k |
+| 1.200 despachos, 25% | Sabaneta + Copacabana, $1,51 M | Envigado + Bello, $1,44 M | $1,45 M | $1,26 M |
+
+- La mejor 2.ª van **no** se queda en el núcleo denso. La van de Medellín, con 25 minutos de alcance, ya cubre casi todo el núcleo y todavía le sobra capacidad. La segunda rinde más alcanzando el norte (Bello, Copacabana, Girardota y Barbosa suman 24% de los envíos), que de otro modo vuelve entero al CEDI.
+- Partir el núcleo en dos cuesta entre $47 mil y $109 mil netos por día en estos escenarios.
+- El algoritmo de valor neto queda a $13 mil, $8 mil y $58 mil del mejor par. El de mayor alcance queda entre $97 mil y $245 mil por debajo.
+- Cambia con el alcance: con **15 minutos**, la 2.ª van sí va al sur y parte el núcleo (Medellín + Sabaneta con concentración), porque la primera ya no cubre todo.
+- Con los parámetros por defecto una sola van rinde más que dos: $231 mil contra $51 mil por día, y tres pierden $176 mil. Con 15% de novedad, la 2.ª van no supera a la 1.ª en todo el rango de 150 a 1.200 despachos.
+
+### Intercepta o recorre
+
+Neto por día y % de fallos salvados, promedio de 8 días, con la ubicación por historial:
+
+| Escenario | Vans | Intercepta | Recorre (todas las motos) | Recorre (solo pendientes) |
+| --- | --- | --- | --- | --- |
+| 600 despachos, 24 motos | 1 | $231 k · 32% | $149 k · 17% | $236 k · 19% |
+|  | 2 | $51 k · 34% | $41 k · 22% | $108 k · 23% |
+| 900 despachos, 36 motos | 1 | $477 k · 30% | $143 k · 12% | $202 k · 13% |
+|  | 2 | $400 k · 33% | $421 k · 19% | $469 k · 20% |
+|  | 3 | $243 k · 35% | $364 k · 24% | $428 k · 25% |
+| 1.200 despachos, 45 motos | 2 | $1,42 M · 28% | $1,21 M · 14% | $1,34 M · 16% |
+|  | 3 | $1,67 M · 34% | $1,59 M · 21% | $1,65 M · 21% |
+
+- **Con 1 van, intercepta gana:** una sola van no alcanza a visitar a todas las motos en cada ventana.
+- **Con 2 o 3 vans y muchas motos, recorre empata o gana**, sobre todo si solo visita a las motos con algo pendiente. Salva menos paquetes, pero no paga desvíos y ahorra el regreso de las motos al CEDI.
+- **Depende de cuánto vale un minuto de la moto.** Con 900 despachos, 36 motos y 2 vans:
+
+| Costo por minuto de la moto | Intercepta | Recorre |
+| --- | --- | --- |
+| $0 | $1,03 M | $366 k |
+| $300 | $400 k | $421 k |
+| $600 | −$355 k | $476 k |
+| $900 | −$593 k | $532 k |
+
+Si el tiempo de las motos es caro, cada desvío a la van destruye valor y recorrer gana con claridad. Si es barato, interceptar gana.
 
 Son resultados de un modelo sintético. Con una distribución real de fallos pueden cambiar.
 
@@ -76,9 +120,10 @@ Son resultados de un modelo sintético. Con una distribución real de fallos pue
 
 Las cuatro tarjetas de análisis promedian **8 días simulados** (semillas consecutivas) con los parámetros actuales. Si eliges 0 vans, usan 2.
 
-- **Cuántas vans:** neto por día (recuperado menos costo de las vans y de los desvíos) con 0 a 3 vans.
+- **Cuántas vans:** neto por día con 0 a 3 vans, en el modo elegido.
 - **Punto de equilibrio:** neto por día según despachos diarios (150 a 1.200) para 1, 2 y 3 vans, con la tasa de novedad actual. Los cruces se interpolan linealmente entre puntos de 50 despachos.
-- **Dónde poner las vans:** zonas fijas, historial con cada criterio y el techo con conocimiento del día, lado a lado.
+- **Dónde poner las vans:** zonas fijas, historial con cada criterio y el techo con conocimiento del día, lado a lado. En recorridos hay un solo criterio (concentración de motos).
+- **¿Intercepta o recorre?:** los dos modos con 1, 2 y 3 vans, incluida la variante que solo visita a las motos con algo pendiente.
 - **Sensibilidad:** cada supuesto se mueve hacia abajo y hacia arriba con todo lo demás fijo. Rangos: éxito del 2.º intento ±20 puntos, tasa de novedad ±5 puntos, tiempo máximo ±10 min, proporción de Grado A 35% a 55% (Grado C compensa), éxito de Grado B 65% a 95%, margen de Grado A 20% a 36%, parte del margen que se pierde ±25 puntos, costo del desvío $150 a $450 por minuto, costo de van ±25%, flete ±33%, capacidad de la van 40 a 120 paquetes y valor COD ±20%.
 
 Los rangos son un juicio razonable, no intervalos medidos. Con datos reales se reemplazan por los observados.
@@ -94,9 +139,11 @@ Limitaciones: es tiempo de carro sin tráfico por hora del día, y las motos sue
 
 ## Lo que el modelo no hace todavía
 
-- Las vans se ubican una vez por día y no se mueven mientras trabajan.
+- En intercepción, las vans se ubican una vez por día y no se mueven mientras trabajan.
 - La ubicación se calcula suponiendo que cada van atiende primero los paquetes más valiosos, pero en la simulación se atiende por orden de hora, que es lo que haría una operación real. Con la capacidad llena, eso puede hacer que más alcance rinda menos.
-- El tiempo de respuesta no cambia la probabilidad de éxito del segundo intento; solo cuesta el desvío de la moto.
+- En intercepción, el tiempo de viaje hasta la van solo cuesta el desvío de la moto; aparte del reloj del día, no cambia las probabilidades de éxito.
+- En recorridos, la ruta de la van es una heurística (la moto más cercana primero), no una ruta óptima, y la posición de cada moto es el centro de su zona, no su ubicación real durante el día.
+- El ahorro al cierre supone que la moto, sin paquetes fallidos, no pasa por el CEDI.
 - No hay variación de tráfico por hora.
 - Los grados A, B y C son una proporción fija, no una clasificación de paquetes reales.
 - Los costos son estimaciones redondas, no cotizaciones.

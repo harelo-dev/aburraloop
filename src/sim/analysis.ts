@@ -8,19 +8,20 @@ export interface Mean {
   recovered: number
   vanCost: number
   detourCost: number
+  tripSaving: number
   net: number
   savedPct: number
 }
 
 /** Average over `days` simulated days (seeds seed, seed+1, ...). */
 export function meanOver(p: Params, days = ANALYSIS_DAYS, a: Assumptions = ASSUMPTIONS): Mean {
-  let failed = 0, saved = 0, recovered = 0, vanCost = 0, detourCost = 0, net = 0
+  let failed = 0, saved = 0, recovered = 0, vanCost = 0, detourCost = 0, tripSaving = 0, net = 0
   for (let d = 0; d < days; d++) {
     const r = simulate({ ...p, seed: p.seed + d }, a)
-    failed += r.failed; saved += r.saved; recovered += r.recovered; vanCost += r.vanCost; detourCost += r.detourCost; net += r.net
+    failed += r.failed; saved += r.saved; recovered += r.recovered; vanCost += r.vanCost; detourCost += r.detourCost; tripSaving += r.tripSaving; net += r.net
   }
-  failed /= days; saved /= days; recovered /= days; vanCost /= days; detourCost /= days; net /= days
-  return { failed, saved, recovered, vanCost, detourCost, net, savedPct: failed ? (saved / failed) * 100 : 0 }
+  failed /= days; saved /= days; recovered /= days; vanCost /= days; detourCost /= days; tripSaving /= days; net /= days
+  return { failed, saved, recovered, vanCost, detourCost, tripSaving, net, savedPct: failed ? (saved / failed) * 100 : 0 }
 }
 
 export function vansCurve(p: Params): Mean[] {
@@ -76,6 +77,7 @@ export interface PlacementRow {
 
 /** Fixed zones, history with each objective, and the same-day ceiling for the objective in use. */
 export function placementComparison(p: Params): PlacementRow[] {
+  // In rounds mode the vans always follow the couriers' concentration, so the criteria collapse into one.
   const cases: { id: PlacementRow['id']; placement: Placement; objective: Objective }[] = [
     { id: 'zones', placement: 'zones', objective: p.objective },
     { id: 'history-reach', placement: 'history', objective: 'reach' },
@@ -83,7 +85,8 @@ export function placementComparison(p: Params): PlacementRow[] {
     { id: 'history-density', placement: 'history', objective: 'density' },
     { id: 'hindsight', placement: 'hindsight', objective: p.objective },
   ]
-  return cases.map(({ id, placement, objective }) => {
+  const used = p.mode === 'rounds' ? cases.filter((c) => c.id === 'zones' || c.id === 'history-density' || c.id === 'hindsight') : cases
+  return used.map(({ id, placement, objective }) => {
     const q = { ...p, placement, objective }
     return { id, mean: meanOver(q), sites: simulate(q).vans.map((v) => v.municipality) }
   })
@@ -140,4 +143,21 @@ export function sensitivity(p: Params): { base: number; rows: Sensitivity[] } {
   })
   rows.sort((x, y) => y.swing - x.swing)
   return { base, rows }
+}
+
+export interface ModeRow {
+  vans: number
+  intercept: Mean
+  rounds: Mean
+  roundsPending: Mean
+}
+
+/** Vans that intercept failures during the day against vans that do morning and afternoon rounds, for 1 to 3 vans. */
+export function modeComparison(p: Params): ModeRow[] {
+  return ([1, 2, 3] as const).map((vans) => ({
+    vans,
+    intercept: meanOver({ ...p, vans, mode: 'intercept' }),
+    rounds: meanOver({ ...p, vans, mode: 'rounds', skipEmptyVisits: false }),
+    roundsPending: meanOver({ ...p, vans, mode: 'rounds', skipEmptyVisits: true }),
+  }))
 }

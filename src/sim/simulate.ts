@@ -16,6 +16,12 @@ export type Placement = 'zones' | 'history' | 'hindsight'
  * density: vans go where failures concentrate, minimising the total road time to them (p-median).
  */
 export type Objective = 'reach' | 'value' | 'density'
+/**
+ * intercept: a van sits on a cell and takes the failures that happen within reach during the day.
+ * rounds: the van visits every courier of its group once in the morning and once in the afternoon and picks up
+ * what failed; at closing the couriers go to the van instead of going back to the CEDI.
+ */
+export type Mode = 'intercept' | 'rounds'
 
 export interface Params {
   cedi: CediId
@@ -33,6 +39,9 @@ export interface Params {
   detourCopPerMin: number
   placement: Placement
   objective: Objective
+  mode: Mode
+  /** Rounds mode: the van visits only couriers that have a failure waiting, instead of every courier every round. */
+  skipEmptyVisits: boolean
   seed: number
 }
 
@@ -47,6 +56,14 @@ export interface Assumptions {
   vanCapacity: number
   codRange: readonly [number, number]
   hours: readonly [number, number]
+  /** Rounds mode: hours in which the van does its morning and afternoon visits. */
+  amWindow: readonly [number, number]
+  pmWindow: readonly [number, number]
+  /** Minutes the van spends with each courier on a visit (handing packages over, paperwork). */
+  handoffMinutes: number
+  /** A second attempt works at full odds if the package reaches the van before this hour and has no chance from the later hour; in between it falls linearly. */
+  attemptFullUntil: number
+  attemptNoneFrom: number
 }
 
 export const ASSUMPTIONS: Assumptions = {
@@ -60,6 +77,11 @@ export const ASSUMPTIONS: Assumptions = {
   vanCapacity: 80,
   codRange: [85_000, 150_000],
   hours: [8, 16.5],
+  amWindow: [9, 12],
+  pmWindow: [13, 16],
+  handoffMinutes: 6,
+  attemptFullUntil: 12,
+  attemptNoneFrom: 17,
 }
 
 export interface Incident {
@@ -97,11 +119,16 @@ export interface Result {
   vanCost: number
   /** Couriers' detours to reach the vans, for every package handed to one. */
   detourCost: number
-  /** recovered - vanCost - detourCost */
+  /** Rounds mode: pesos of courier time saved by dropping at the van instead of going back to the CEDI. */
+  tripSaving: number
+  /** recovered + tripSaving - vanCost - detourCost */
   net: number
   deadWeightTraditional: number
   deadWeightWithVans: number
   vans: VanPlacement[]
+  /** Rounds mode: where the couriers work and how many scheduled visits the vans could make. */
+  couriers: { lat: number; lon: number }[]
+  visits: { done: number; skipped: number }
 }
 
 const CELLS = travel.cells
@@ -184,12 +211,17 @@ export function generateIncidents(p: Params, a: Assumptions, seed: number): Inci
   return out
 }
 
+/** Share of the second-attempt odds left when a package reaches the van at `hour`: the later in the day, the less time to redeliver. */
+export function attemptFactor(hour: number, a: Assumptions) {
+  return Math.min(1, Math.max(0, (a.attemptNoneFrom - hour) / (a.attemptNoneFrom - a.attemptFullUntil)))
+}
+
 /** Expected pesos recovered if this failure is intercepted: the odds the second attempt works times what it recovers. */
 function expectedValue(q: Incident, p: Params, a: Assumptions) {
   if (q.grade === 'C') return 0
   const success = q.grade === 'A' ? p.secondAttemptSuccess : a.gradeBSuccess
   const margin = (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
-  return success * (2 * q.cediKm * a.freightCopPerKm + a.handlingCop + q.cod * margin)
+  return success * attemptFactor(q.hour, a) * (2 * q.cediKm * a.freightCopPerKm + a.handlingCop + q.cod * margin)
 }
 
 /**
@@ -232,11 +264,12 @@ export function allowedCells(p: Pick<Params, 'cedi' | 'minCediMinutes'>): boolea
 }
 
 /** Per cell: expected recovered value of the savable failures (Grade A or B) and how many there are. */
-interface Demand { ev: number[]; count: number[] }
+interface Demand { ev: number[]; count: number[]; all: number[] }
 
 const demandFrom = (incidents: Incident[], p: Params, a: Assumptions): Demand => {
-  const d: Demand = { ev: new Array<number>(N).fill(0), count: new Array<number>(N).fill(0) }
+  const d: Demand = { ev: new Array<number>(N).fill(0), count: new Array<number>(N).fill(0), all: new Array<number>(N).fill(0) }
   for (const q of incidents) {
+    d.all[q.cell] += 1
     if (q.grade === 'C') continue
     d.ev[q.cell] += expectedValue(q, p, a)
     d.count[q.cell] += 1
@@ -338,10 +371,10 @@ function trainingDemand(p: Params, a: Assumptions): Demand {
   const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, p.marginLossShare, a])
   const hit = trainingCache.get(key)
   if (hit) return hit
-  const avg: Demand = { ev: new Array<number>(N).fill(0), count: new Array<number>(N).fill(0) }
+  const avg: Demand = { ev: new Array<number>(N).fill(0), count: new Array<number>(N).fill(0), all: new Array<number>(N).fill(0) }
   for (let day = 0; day < TRAINING_DAYS; day++) {
     const d = demandFrom(generateIncidents(p, a, TRAINING_SEED + day), p, a)
-    for (let j = 0; j < N; j++) { avg.ev[j] += d.ev[j] / TRAINING_DAYS; avg.count[j] += d.count[j] / TRAINING_DAYS }
+    for (let j = 0; j < N; j++) { avg.ev[j] += d.ev[j] / TRAINING_DAYS; avg.count[j] += d.count[j] / TRAINING_DAYS; avg.all[j] += d.all[j] / TRAINING_DAYS }
   }
   if (trainingCache.size > 400) trainingCache.clear()
   trainingCache.set(key, avg)
@@ -363,13 +396,15 @@ export function vanCells(p: Params, a: Assumptions, incidents: Incident[]): numb
   if (p.vans === 0) return []
   const allowed = allowedCells(p)
   const choose = (d: Demand, initial: number[] = []) =>
-    p.objective === 'value'
+    p.mode === 'rounds'
+      ? densityPlacement(p.vans, d.all, p.maxMinutes, allowed, initial)
+      : p.objective === 'value'
       ? valuePlacement(p.vans, d, p.maxMinutes, a.vanCapacity, p.detourCopPerMin, allowed, initial)
       : p.objective === 'density'
         ? densityPlacement(p.vans, d.count, p.maxMinutes, allowed, initial)
         : greedyPlacement(p.vans, d.ev, p.maxMinutes, allowed, initial)
   if (p.placement === 'hindsight') return choose(demandFrom(incidents, p, a))
-  const key = (tag: string) => JSON.stringify([tag, p.objective, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, a])
+  const key = (tag: string) => JSON.stringify([tag, p.mode, p.objective, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, a])
   if (p.placement === 'zones') {
     const anchors = ZONE_ANCHORS[p.vans]
       .map((id) => places.vanAnchors.find((v) => v.id === id)!)
@@ -388,6 +423,7 @@ export function simulate(p: Params, a: Assumptions = ASSUMPTIONS): Result {
 
 /** Runs the day with the vans on the given cells. */
 export function simulateAt(p: Params, a: Assumptions, incidents: Incident[], cells: number[]): Result {
+  if (p.mode === 'rounds') return simulateRounds(p, a, incidents, cells)
   const vans: VanPlacement[] = cells.map((cell, i) => ({
     name: `V${i + 1}`, lat: CELLS[cell].lat, lon: CELLS[cell].lon, cell,
     municipality: nearestMunicipality(CELLS[cell].lat, CELLS[cell].lon), handled: 0,
@@ -411,7 +447,7 @@ export function simulateAt(p: Params, a: Assumptions, incidents: Incident[], cel
     vans[pick].handled++
     q.vanIndex = pick
     detourCost += 2 * pickMin * p.detourCopPerMin
-    const success = q.grade === 'A' ? p.secondAttemptSuccess : a.gradeBSuccess
+    const success = (q.grade === 'A' ? p.secondAttemptSuccess : a.gradeBSuccess) * attemptFactor(q.hour + pickMin / 60, a)
     if (q.roll < success) {
       q.saved = true
       const margin = (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
@@ -425,14 +461,148 @@ export function simulateAt(p: Params, a: Assumptions, incidents: Incident[], cel
     incidents, failed, saved, returned: failed - saved, recovered,
     vanCost: vans.length * a.vanCostCopPerDay,
     detourCost,
+    tripSaving: 0,
     net: recovered - vans.length * a.vanCostCopPerDay - detourCost,
     deadWeightTraditional: failed / p.fleet,
     deadWeightWithVans: (failed - saved) / p.fleet,
     vans,
+    couriers: [],
+    visits: { done: 0, skipped: 0 },
+  }
+}
+
+const COURIER_SEED = 424242
+const courierCache = new Map<number, { municipality: string; cell: number }[]>()
+
+/** The same couriers every day: spread over the municipalities by share of shipments (largest remainder), each with a home cell. */
+function couriersFor(fleet: number) {
+  const hit = courierCache.get(fleet)
+  if (hit) return hit
+  const r = mulberry32(COURIER_SEED)
+  const total = places.municipalities.reduce((sum, m) => sum + m.weight, 0)
+  const quota = places.municipalities.map((m) => (fleet * m.weight) / total)
+  const counts = quota.map(Math.floor)
+  let left = fleet - counts.reduce((x, y) => x + y, 0)
+  quota.map((q, i) => ({ i, f: q - Math.floor(q) })).sort((x, y) => y.f - x.f).forEach(({ i }) => { if (left-- > 0) counts[i]++ })
+  const out: { municipality: string; cell: number }[] = []
+  places.municipalities.forEach((m, i) => {
+    for (let k = 0; k < counts[i]; k++) {
+      const dLat = (gauss(r) * m.sigmaKm * 0.7) / 111.2
+      const dLon = (gauss(r) * m.sigmaKm * 0.7) / (111.2 * Math.cos((m.lat * Math.PI) / 180))
+      out.push({ municipality: m.name, cell: nearestCell(m.lat + dLat, m.lon + dLon) })
+    }
+  })
+  courierCache.set(fleet, out)
+  return out
+}
+
+/**
+ * Rounds mode. Every courier belongs to the nearest van within reach. Each van visits its couriers (nearest first)
+ * once in the morning window and once in the afternoon window; couriers it cannot reach before the window closes
+ * wait for the next round. A failure is handed over at the first visit after it happened; later ones go to the
+ * van at closing. Packages handed over in a round can get a second attempt the same day, up to the van's capacity.
+ * At closing, a courier with failures drops at the van instead of going back to the CEDI and saves the difference.
+ */
+function simulateRounds(p: Params, a: Assumptions, incidents: Incident[], cells: number[]): Result {
+  const vans: VanPlacement[] = cells.map((cell, i) => ({
+    name: `V${i + 1}`, lat: CELLS[cell].lat, lon: CELLS[cell].lon, cell,
+    municipality: nearestMunicipality(CELLS[cell].lat, CELLS[cell].lon), handled: 0,
+  }))
+  const couriers = couriersFor(p.fleet)
+  const cediIdx = travel.origins.indexOf(`cedi:${p.cedi}`)
+
+  const group = couriers.map((c) => {
+    let best = -1
+    let bt = Infinity
+    vans.forEach((v, k) => { const t = minutesBetween(v.cell, c.cell); if (t <= p.maxMinutes && t < bt) { bt = t; best = k } })
+    return best
+  })
+
+  const owner = incidents.map((q) => {
+    const mine = couriers.map((_, i) => i).filter((i) => couriers[i].municipality === q.municipality)
+    const pool = mine.length ? mine : couriers.map((_, i) => i)
+    let best = pool[0]
+    let bd = Infinity
+    for (const i of pool) {
+      const d = (CELLS[couriers[i].cell].lat - q.lat) ** 2 + (CELLS[couriers[i].cell].lon - q.lon) ** 2
+      if (d < bd) { bd = d; best = i }
+    }
+    return best
+  })
+
+  let done = 0
+  let skipped = 0
+  const visitTimes = (window: readonly [number, number], since: (number | undefined)[]) => {
+    const at = new Array<number | undefined>(couriers.length).fill(undefined)
+    const waiting = (i: number) => incidents.some((q, n) => owner[n] === i && q.hour > (since[i] ?? 0) && q.hour <= window[1])
+    vans.forEach((v, k) => {
+      const pending = couriers.map((_, i) => i).filter((i) => group[i] === k && (!p.skipEmptyVisits || waiting(i)))
+      let pos = v.cell
+      let t = window[0] * 60
+      while (pending.length) {
+        let pick = 0
+        for (let n = 1; n < pending.length; n++) if (minutesBetween(pos, couriers[pending[n]].cell) < minutesBetween(pos, couriers[pending[pick]].cell)) pick = n
+        const i = pending[pick]
+        const arrive = t + minutesBetween(pos, couriers[i].cell) + a.handoffMinutes
+        if (arrive > window[1] * 60) break
+        t = arrive
+        at[i] = t / 60
+        pos = couriers[i].cell
+        pending.splice(pick, 1)
+        done++
+      }
+      skipped += pending.length
+    })
+    return at
+  }
+  const am = visitTimes(a.amWindow, [])
+  const pm = visitTimes(a.pmWindow, am)
+
+  let recovered = 0
+  let atClosing = 0
+  const withFailures = new Set<number>()
+  const order = incidents.map((_, i) => i).sort((x, y) => incidents[x].hour - incidents[y].hour)
+  for (const idx of order) {
+    const q = incidents[idx]
+    const c = owner[idx]
+    withFailures.add(c)
+    const k = group[c]
+    const handoff = am[c] !== undefined && q.hour <= am[c]! ? am[c]! : pm[c] !== undefined && q.hour <= pm[c]! ? pm[c]! : null
+    if (k >= 0) q.vanIndex = k
+    if (handoff === null || k < 0) { atClosing++; continue }
+    if (q.grade === 'C' || vans[k].handled >= a.vanCapacity) continue
+    vans[k].handled++
+    const success = (q.grade === 'A' ? p.secondAttemptSuccess : a.gradeBSuccess) * attemptFactor(handoff, a)
+    if (q.roll < success) {
+      q.saved = true
+      const margin = (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
+      recovered += 2 * q.cediKm * a.freightCopPerKm + a.handlingCop + q.cod * margin
+    }
+  }
+
+  let tripSaving = 0
+  withFailures.forEach((c) => {
+    if (group[c] < 0) return
+    const toCedi = CELLS[couriers[c].cell].min[cediIdx]
+    const toVan = minutesBetween(couriers[c].cell, vans[group[c]].cell)
+    tripSaving += Math.max(0, toCedi - toVan) * p.detourCopPerMin
+  })
+
+  const failed = incidents.length
+  const saved = incidents.filter((q) => q.saved).length
+  const vanCost = vans.length * a.vanCostCopPerDay
+  return {
+    incidents, failed, saved, returned: failed - saved, recovered, vanCost, detourCost: 0, tripSaving,
+    net: recovered + tripSaving - vanCost,
+    deadWeightTraditional: failed / p.fleet,
+    deadWeightWithVans: atClosing / p.fleet,
+    vans,
+    couriers: couriers.map((c) => ({ lat: CELLS[c.cell].lat, lon: CELLS[c.cell].lon })),
+    visits: { done, skipped },
   }
 }
 
 export const defaultParams: Params = {
   cedi: 'centro', volume: 600, fleet: 24, failureRate: 0.15, vans: 2, maxMinutes: 25,
-  secondAttemptSuccess: 0.6, minCediMinutes: 10, marginLossShare: 0.5, detourCopPerMin: 300, placement: 'history', objective: 'value', seed: 7,
+  secondAttemptSuccess: 0.6, minCediMinutes: 10, marginLossShare: 0.5, detourCopPerMin: 300, placement: 'history', objective: 'value', mode: 'intercept', skipEmptyVisits: false, seed: 7,
 }

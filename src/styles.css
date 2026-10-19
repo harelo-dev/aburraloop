@@ -96,3 +96,12 @@ tr.sel td:first-child::before { content: "▸ "; color: var(--accent); }
 .tor-track b { position: absolute; top: 1px; height: 8px; border-radius: 1px; }
 .take.list.plain { list-style: disc; padding-left: 18px; }
 .take.list.plain li { padding-left: 2px; }
+.legend i.ring { background: #fff; border: 1.5px solid var(--ink); }
+label.check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; font-size: 13px; color: var(--muted); margin-top: 4px; }
+label.check input { margin-top: 3px; accent-color: var(--accent); }
+.an-grid .wide { grid-column: 1 / -1; }
+.mode-row { display: grid; grid-template-columns: 70px repeat(3, minmax(0, 1fr)); gap: 10px; align-items: center; font-size: 13.5px; padding: 8px 0; border-top: 1px solid var(--line); }
+.mode-row.head { border-top: 0; color: var(--muted); font-size: 12px; padding-top: 0; }
+.mode-row .n { font-family: var(--mono); font-size: 13px; }
+.mode-row .win { font-weight: 600; color: var(--accent); }
+@media (max-width: 520px) { .mode-row { grid-template-columns: 52px repeat(3, minmax(0, 1fr)); gap: 6px; font-size: 12px; } .mode-row .n { font-size: 11.5px; } }

@@ -18,8 +18,9 @@ Compara dos modelos:
 - Costo diario de las vans.
 - Peso muerto por motorizado: paquetes fallidos que cada moto carga sin punto de descarga intermedio.
 
-Debajo del mapa hay un análisis con cuatro vistas, promediadas sobre 8 días simulados:
+La van puede operar de dos formas: **interceptar** los fallos en la calle, o **recorrer** a cada moto una vez en la mañana y otra en la tarde y servir de punto de cierre, de modo que la moto no vuelve al CEDI. Debajo del mapa hay un análisis con cinco vistas, promediadas sobre 8 días simulados:
 
+- **¿Intercepta o recorre?** los dos modos con 1, 2 y 3 vans, lado a lado.
 - **Cuántas vans conviene** según el neto diario.
 - **Punto de equilibrio:** desde cuántos despachos diarios se paga cada van y cuándo la 2.ª y la 3.ª superan a la anterior.
 - **Dónde poner las vans:** fijas por zona, según los fallos de días previos o con conocimiento del día (un techo no alcanzable), con tres criterios: mayor alcance, mayor valor neto o concentración de paquetes.
