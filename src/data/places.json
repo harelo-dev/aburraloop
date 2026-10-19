@@ -1,0 +1,24 @@
+{
+  "municipalities": [
+    { "id": "medellin", "name": "Medellín", "lat": 6.2442, "lon": -75.5812, "weight": 48, "sigmaKm": 3.5, "zone": "centro" },
+    { "id": "bello", "name": "Bello", "lat": 6.3373, "lon": -75.5579, "weight": 12, "sigmaKm": 2.2, "zone": "norte" },
+    { "id": "copacabana", "name": "Copacabana", "lat": 6.3478, "lon": -75.5086, "weight": 6, "sigmaKm": 1.8, "zone": "norte" },
+    { "id": "girardota", "name": "Girardota", "lat": 6.3772, "lon": -75.4472, "weight": 4, "sigmaKm": 1.8, "zone": "norte" },
+    { "id": "barbosa", "name": "Barbosa", "lat": 6.4386, "lon": -75.3322, "weight": 2, "sigmaKm": 1.5, "zone": "norte" },
+    { "id": "itagui", "name": "Itagüí", "lat": 6.1846, "lon": -75.5991, "weight": 10, "sigmaKm": 2.0, "zone": "sur" },
+    { "id": "envigado", "name": "Envigado", "lat": 6.1759, "lon": -75.5917, "weight": 8, "sigmaKm": 2.0, "zone": "sur" },
+    { "id": "sabaneta", "name": "Sabaneta", "lat": 6.1515, "lon": -75.6166, "weight": 4, "sigmaKm": 1.5, "zone": "sur" },
+    { "id": "laestrella", "name": "La Estrella", "lat": 6.1577, "lon": -75.6436, "weight": 3, "sigmaKm": 1.8, "zone": "sur" },
+    { "id": "caldas", "name": "Caldas", "lat": 6.0911, "lon": -75.636, "weight": 3, "sigmaKm": 1.5, "zone": "sur" }
+  ],
+  "cedis": [
+    { "id": "sur", "name": "CEDI Sur · Sabaneta", "lat": 6.1515, "lon": -75.6166 },
+    { "id": "centro", "name": "CEDI Centro · Guayabal", "lat": 6.208, "lon": -75.589 },
+    { "id": "gir", "name": "CEDI Girardota", "lat": 6.3772, "lon": -75.4472 }
+  ],
+  "vanAnchors": [
+    { "id": "norte", "name": "Van Norte", "lat": 6.3373, "lon": -75.5579 },
+    { "id": "centro", "name": "Van Centro", "lat": 6.2442, "lon": -75.5812 },
+    { "id": "sur", "name": "Van Sur", "lat": 6.1846, "lon": -75.5991 }
+  ]
+}
