@@ -26,8 +26,8 @@ describe('simulate', () => {
   })
 
   it('more reach never saves fewer packages (same seed)', () => {
-    const short = simulate({ ...defaultParams, maxMinutes: 10 })
-    const long = simulate({ ...defaultParams, maxMinutes: 40 })
+    const short = simulate({ ...defaultParams, placement: 'zones', maxMinutes: 10 })
+    const long = simulate({ ...defaultParams, placement: 'zones', maxMinutes: 40 })
     expect(long.saved).toBeGreaterThanOrEqual(short.saved)
   })
 })

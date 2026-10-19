@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import maplibregl, { type GeoJSONSource } from 'maplibre-gl'
 import places from './data/places.json'
 import travel from './data/travel.json'
-import type { Params, Result } from './sim/simulate'
+import { minutesBetween, type Params, type Result } from './sim/simulate'
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron'
 const MAX_LINES = 90
@@ -13,10 +13,9 @@ const point = (lon: number, lat: number, props: Record<string, unknown> = {}) =>
 
 function build(result: Result, params: Params) {
   const cedi = places.cedis.find((c) => c.id === params.cedi)!
-  const vanIdx = result.vans.map((v) => travel.origins.indexOf(`van:${places.vanAnchors.find((a) => a.name === v.name)!.id}`))
   const h = travel.step / 2
   const reach = travel.cells
-    .filter((c) => vanIdx.some((i) => c.min[i] <= params.maxMinutes))
+    .filter((_, i) => result.vans.some((v) => minutesBetween(v.cell, i) <= params.maxMinutes))
     .map((c) => ({
       type: 'Feature' as const, properties: {},
       geometry: { type: 'Polygon' as const, coordinates: [[[c.lon - h, c.lat - h], [c.lon + h, c.lat - h], [c.lon + h, c.lat + h], [c.lon - h, c.lat + h], [c.lon - h, c.lat - h]]] },
@@ -28,7 +27,7 @@ function build(result: Result, params: Params) {
     reach: { type: 'FeatureCollection' as const, features: reach },
     lines: { type: 'FeatureCollection' as const, features: lines },
     incidents: { type: 'FeatureCollection' as const, features: result.incidents.map((q) => point(q.lon, q.lat, { saved: q.saved })) },
-    vans: { type: 'FeatureCollection' as const, features: result.vans.map((v, i) => point(v.lon, v.lat, { label: `V${i + 1}` })) },
+    vans: { type: 'FeatureCollection' as const, features: result.vans.map((v) => point(v.lon, v.lat, { label: v.name })) },
     cedi: { type: 'FeatureCollection' as const, features: [point(cedi.lon, cedi.lat, { label: cedi.name })] },
   }
 }

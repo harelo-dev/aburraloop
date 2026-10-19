@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
+import { Analysis } from './Analysis'
 import { MapView } from './MapView'
-import { ASSUMPTIONS, defaultParams, simulate, type Params } from './sim/simulate'
+import { ASSUMPTIONS, defaultParams, simulate, type Params, type Placement } from './sim/simulate'
 import { cop, dec } from './format'
 import travel from './data/travel.json'
 
@@ -62,6 +63,14 @@ export function App() {
             </div>
             <p className="hint">0 = modelo tradicional.</p>
           </div>
+          <div className="ctl">
+            <label htmlFor="placement">Dónde van las vans</label>
+            <select id="placement" value={p.placement} disabled={p.vans === 0} onChange={(e) => set('placement', e.target.value as Placement)}>
+              <option value="concentration">Según concentración de fallos</option>
+              <option value="zones">Fijas por zona</option>
+              <option value="hindsight">Con conocimiento del día (techo)</option>
+            </select>
+          </div>
           <h2 className="sep">Supuestos que tú ajustas</h2>
           <Slider id="mins" label="Tiempo máx. van → paquete" value={p.maxMinutes} min={10} max={45} step={5} out={`${p.maxMinutes} min`} onChange={(v) => set('maxMinutes', v)} />
           <p className="hint tight">La zona verde del mapa es lo que cada van alcanza por carretera en ese tiempo.</p>
@@ -110,11 +119,13 @@ export function App() {
               <div>Costo por van/día: <b>{cop(ASSUMPTIONS.vanCostCopPerDay)}</b></div>
               <div>Capacidad por van: <b>{ASSUMPTIONS.vanCapacity} paquetes/día</b></div>
               <div>Tiempos de viaje: <b>{travel.cells.length} celdas de ~1 km, OSRM (carro)</b></div>
-              <div>Ubicación de vans: <b>fija por zona</b></div>
+              <div>Ubicación de vans: <b>{p.placement === 'zones' ? 'fija por zona' : p.placement === 'concentration' ? 'según fallos de 10 días previos' : 'según los fallos del día (techo)'}</b></div>
             </div>
           </div>
         </section>
       </div>
+
+      <Analysis params={p} />
 
       <footer>
         Simulación con datos sintéticos, no una predicción para una operación concreta. Con datos reales de novedades, el mismo modelo da una estimación propia.

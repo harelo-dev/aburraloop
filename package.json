@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "build:matrix": "node scripts/build-matrix.mjs"
+    "build:matrix": "node scripts/build-matrix.mjs",
+    "build:cellmatrix": "node scripts/build-cell-matrix.mjs"
   },
   "dependencies": {
     "maplibre-gl": "5.6.0",
