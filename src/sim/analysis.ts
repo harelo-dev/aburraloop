@@ -1,4 +1,4 @@
-import { ASSUMPTIONS, simulate, type Assumptions, type Params, type Placement } from './simulate'
+import { ASSUMPTIONS, simulate, type Assumptions, type Objective, type Params, type Placement } from './simulate'
 
 export const ANALYSIS_DAYS = 8
 
@@ -7,19 +7,20 @@ export interface Mean {
   saved: number
   recovered: number
   vanCost: number
+  detourCost: number
   net: number
   savedPct: number
 }
 
 /** Average over `days` simulated days (seeds seed, seed+1, ...). */
 export function meanOver(p: Params, days = ANALYSIS_DAYS, a: Assumptions = ASSUMPTIONS): Mean {
-  let failed = 0, saved = 0, recovered = 0, vanCost = 0
+  let failed = 0, saved = 0, recovered = 0, vanCost = 0, detourCost = 0, net = 0
   for (let d = 0; d < days; d++) {
     const r = simulate({ ...p, seed: p.seed + d }, a)
-    failed += r.failed; saved += r.saved; recovered += r.recovered; vanCost += r.vanCost
+    failed += r.failed; saved += r.saved; recovered += r.recovered; vanCost += r.vanCost; detourCost += r.detourCost; net += r.net
   }
-  failed /= days; saved /= days; recovered /= days; vanCost /= days
-  return { failed, saved, recovered, vanCost, net: recovered - vanCost, savedPct: failed ? (saved / failed) * 100 : 0 }
+  failed /= days; saved /= days; recovered /= days; vanCost /= days; detourCost /= days; net /= days
+  return { failed, saved, recovered, vanCost, detourCost, net, savedPct: failed ? (saved / failed) * 100 : 0 }
 }
 
 export function vansCurve(p: Params): Mean[] {
@@ -68,15 +69,23 @@ export function marginalVolume(points: VolumePoint[], series: number): number | 
 }
 
 export interface PlacementRow {
-  placement: Placement
+  id: 'zones' | 'history-reach' | 'history-value' | 'history-density' | 'hindsight'
   mean: Mean
   sites: string[]
 }
 
+/** Fixed zones, history with each objective, and the same-day ceiling for the objective in use. */
 export function placementComparison(p: Params): PlacementRow[] {
-  return (['zones', 'concentration', 'hindsight'] as const).map((placement) => {
-    const q = { ...p, placement }
-    return { placement, mean: meanOver(q), sites: simulate(q).vans.map((v) => v.municipality) }
+  const cases: { id: PlacementRow['id']; placement: Placement; objective: Objective }[] = [
+    { id: 'zones', placement: 'zones', objective: p.objective },
+    { id: 'history-reach', placement: 'history', objective: 'reach' },
+    { id: 'history-value', placement: 'history', objective: 'value' },
+    { id: 'history-density', placement: 'history', objective: 'density' },
+    { id: 'hindsight', placement: 'hindsight', objective: p.objective },
+  ]
+  return cases.map(({ id, placement, objective }) => {
+    const q = { ...p, placement, objective }
+    return { id, mean: meanOver(q), sites: simulate(q).vans.map((v) => v.municipality) }
   })
 }
 
@@ -114,9 +123,12 @@ export function sensitivity(p: Params): { base: number; rows: Sensitivity[] } {
   cases.push({ label: 'Proporción de paquetes Grado A', low: ['35%', p, shareA(0.35)], high: ['55%', p, shareA(0.55)] })
 
   cases.push({ label: 'Éxito Grado B (liquidación flash)', low: ['65%', p, withA({ gradeBSuccess: 0.65 })], high: ['95%', p, withA({ gradeBSuccess: 0.95 })] })
-  cases.push({ label: 'Margen recuperado Grado A', low: ['20%', p, withA({ marginA: 0.2 })], high: ['36%', p, withA({ marginA: 0.36 })] })
+  cases.push({ label: 'Margen del producto (Grado A)', low: ['20%', p, withA({ marginA: 0.2 })], high: ['36%', p, withA({ marginA: 0.36 })] })
   cases.push({ label: 'Costo de una van por día', low: [cop(A.vanCostCopPerDay * 0.75), p, withA({ vanCostCopPerDay: A.vanCostCopPerDay * 0.75 })], high: [cop(A.vanCostCopPerDay * 1.25), p, withA({ vanCostCopPerDay: A.vanCostCopPerDay * 1.25 })] })
   cases.push({ label: 'Costo del flete por km', low: [`$${A.freightCopPerKm * 2 / 3}`, p, withA({ freightCopPerKm: A.freightCopPerKm * 2 / 3 })], high: [`$${A.freightCopPerKm * 4 / 3}`, p, withA({ freightCopPerKm: A.freightCopPerKm * 4 / 3 })] })
+  const mlsLo = clamp(p.marginLossShare - 0.25, 0.1, 1), mlsHi = clamp(p.marginLossShare + 0.25, 0.1, 1)
+  cases.push({ label: 'Margen que se pierde si vuelve al CEDI', low: [pct(mlsLo), { ...p, marginLossShare: mlsLo }, A], high: [pct(mlsHi), { ...p, marginLossShare: mlsHi }, A] })
+  cases.push({ label: 'Costo del desvío de la moto por minuto', low: ['$150', { ...p, detourCopPerMin: 150 }, A], high: ['$450', { ...p, detourCopPerMin: 450 }, A] })
   cases.push({ label: 'Capacidad de la van', low: ['40 pq', p, withA({ vanCapacity: 40 })], high: ['120 pq', p, withA({ vanCapacity: 120 })] })
   const codScale = (s: number) => withA({ codRange: [A.codRange[0] * s, A.codRange[1] * s] })
   cases.push({ label: 'Valor COD de los paquetes', low: ['−20%', p, codScale(0.8)], high: ['+20%', p, codScale(1.2)] })

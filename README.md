@@ -22,10 +22,10 @@ Debajo del mapa hay un análisis con cuatro vistas, promediadas sobre 8 días si
 
 - **Cuántas vans conviene** según el neto diario.
 - **Punto de equilibrio:** desde cuántos despachos diarios se paga cada van y cuándo la 2.ª y la 3.ª superan a la anterior.
-- **Dónde poner las vans:** fijas por zona, según la concentración de fallos de días previos, o con conocimiento del día (un techo no alcanzable).
+- **Dónde poner las vans:** fijas por zona, según los fallos de días previos o con conocimiento del día (un techo no alcanzable), con tres criterios: mayor alcance, mayor valor neto o concentración de paquetes.
 - **Sensibilidad:** qué supuesto mueve más el resultado.
 
-Los parámetros de entrada son el CEDI base, el volumen diario (150–1.200), la flota (5–45 motos), la tasa de novedad (5–30%) y de 0 a 3 mini-vans. Además se ajustan el tiempo máximo de viaje de la van y el éxito del segundo intento.
+Los parámetros de entrada son el CEDI base, el volumen diario (150–1.200), la flota (5–45 motos), la tasa de novedad (5–30%) y de 0 a 3 mini-vans. Además se ajustan el tiempo máximo de viaje de la van, la distancia mínima de la van al CEDI, el éxito del segundo intento, qué parte del margen se pierde si un paquete vuelve al CEDI y el costo del desvío de la moto.
 
 ## Cómo funciona
 

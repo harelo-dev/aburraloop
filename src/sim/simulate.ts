@@ -6,10 +6,16 @@ export type Grade = 'A' | 'B' | 'C'
 export type CediId = 'sur' | 'centro' | 'gir'
 /**
  * zones: fixed anchors (Norte, Centro, Sur).
- * concentration: greedy max-coverage over where failures landed on 10 previous simulated days.
- * hindsight: same greedy, but fed the failures of the day itself. Not achievable, kept as a ceiling.
+ * history: where failures landed on 10 previous simulated days.
+ * hindsight: the failures of the day itself. Not achievable, kept as a ceiling.
  */
-export type Placement = 'zones' | 'concentration' | 'hindsight'
+export type Placement = 'zones' | 'history' | 'hindsight'
+/**
+ * reach: each van goes where it covers the most value not yet covered by another (maximum coverage).
+ * value: each van goes where it adds the most net pesos, given van capacity and the courier's detour.
+ * density: vans go where failures concentrate, minimising the total road time to them (p-median).
+ */
+export type Objective = 'reach' | 'value' | 'density'
 
 export interface Params {
   cedi: CediId
@@ -21,7 +27,12 @@ export interface Params {
   secondAttemptSuccess: number // Grade A, 0..1
   /** A van must sit at least this many road minutes from the CEDI: next to it, it intercepts nothing the CEDI would not receive anyway. */
   minCediMinutes: number
+  /** Share of the product margin that is really lost when a failed package goes back to the CEDI (it can be offered again). */
+  marginLossShare: number
+  /** Courier time and fuel spent going to the van and back, per road minute. */
+  detourCopPerMin: number
   placement: Placement
+  objective: Objective
   seed: number
 }
 
@@ -84,6 +95,10 @@ export interface Result {
   returned: number
   recovered: number
   vanCost: number
+  /** Couriers' detours to reach the vans, for every package handed to one. */
+  detourCost: number
+  /** recovered - vanCost - detourCost */
+  net: number
   deadWeightTraditional: number
   deadWeightWithVans: number
   vans: VanPlacement[]
@@ -173,7 +188,7 @@ export function generateIncidents(p: Params, a: Assumptions, seed: number): Inci
 function expectedValue(q: Incident, p: Params, a: Assumptions) {
   if (q.grade === 'C') return 0
   const success = q.grade === 'A' ? p.secondAttemptSuccess : a.gradeBSuccess
-  const margin = q.grade === 'A' ? a.marginA : a.marginB
+  const margin = (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
   return success * (2 * q.cediKm * a.freightCopPerKm + a.handlingCop + q.cod * margin)
 }
 
@@ -216,27 +231,121 @@ export function allowedCells(p: Pick<Params, 'cedi' | 'minCediMinutes'>): boolea
   return ok.some(Boolean) ? ok : ok.map(() => true)
 }
 
-const weightsFrom = (incidents: Incident[], p: Params, a: Assumptions) => {
-  const w = new Array<number>(N).fill(0)
-  for (const q of incidents) w[q.cell] += expectedValue(q, p, a)
-  return w
+/** Per cell: expected recovered value of the savable failures (Grade A or B) and how many there are. */
+interface Demand { ev: number[]; count: number[] }
+
+const demandFrom = (incidents: Incident[], p: Params, a: Assumptions): Demand => {
+  const d: Demand = { ev: new Array<number>(N).fill(0), count: new Array<number>(N).fill(0) }
+  for (const q of incidents) {
+    if (q.grade === 'C') continue
+    d.ev[q.cell] += expectedValue(q, p, a)
+    d.count[q.cell] += 1
+  }
+  return d
 }
 
-const trainingCache = new Map<string, number[]>()
+/**
+ * Value placement. A fluid model of the day: each cell's savable failures go to the nearest vans that
+ * reach it, richest cells first, up to each van's capacity, and every package pays the courier's detour.
+ * Vans are added one at a time wherever that raises the total the most, so a second van lands where the
+ * first one runs out of capacity or is far from the demand, not on the thin periphery.
+ */
+export function valuePlacement(count: number, d: Demand, maxMinutes: number, capacity: number, detourCopPerMin: number, allowed?: boolean[], initial: number[] = []): number[] {
+  const cells: number[] = []
+  for (let j = 0; j < N; j++) if (d.count[j] > 0) cells.push(j)
+  cells.sort((x, y) => d.ev[y] / d.count[y] - d.ev[x] / d.count[x])
+  const per = cells.map((j) => d.ev[j] / d.count[j])
+  const capLeft = new Float64Array(count)
+  const times = new Float64Array(count)
+  const idx = new Int32Array(count)
 
-/** Expected recovered value per cell, averaged over previous simulated days (the operation's "history"). */
-function trainingWeights(p: Params, a: Assumptions): number[] {
-  const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, a])
+  const total = (vans: number[]) => {
+    capLeft.fill(capacity)
+    let sum = 0
+    for (let n = 0; n < cells.length; n++) {
+      const j = cells[n]
+      let m = 0
+      for (let k = 0; k < vans.length; k++) {
+        const t = MINUTES[vans[k]][j]
+        if (t > maxMinutes) continue
+        let i = m++
+        while (i > 0 && times[i - 1] > t) { times[i] = times[i - 1]; idx[i] = idx[i - 1]; i-- }
+        times[i] = t; idx[i] = k
+      }
+      let remaining = d.count[j]
+      for (let i = 0; i < m && remaining > 0; i++) {
+        const take = Math.min(remaining, capLeft[idx[i]])
+        if (take <= 0) continue
+        sum += take * (per[n] - 2 * times[i] * detourCopPerMin)
+        capLeft[idx[i]] -= take
+        remaining -= take
+      }
+    }
+    return sum
+  }
+
+  const chosen = [...initial]
+  while (chosen.length < count) {
+    let best = -1
+    let bestValue = -Infinity
+    for (let c = 0; c < N; c++) {
+      if (chosen.includes(c) || (allowed && !allowed[c])) continue
+      const v = total([...chosen, c])
+      if (v > bestValue) { bestValue = v; best = c }
+    }
+    if (best < 0) break
+    chosen.push(best)
+  }
+  return chosen
+}
+
+/**
+ * Density placement (greedy p-median): each van is added where it cuts the most total road time to the
+ * savable failures, counting packages and not pesos. A package no van reaches counts as twice maxMinutes,
+ * so coverage still matters, but once the dense core is covered a new van splits it instead of heading for
+ * a thin periphery.
+ */
+export function densityPlacement(count: number, packages: number[], maxMinutes: number, allowed?: boolean[], initial: number[] = []): number[] {
+  const unreached = 2 * maxMinutes
+  const best = new Float64Array(N).fill(unreached)
+  const chosen = [...initial]
+  const apply = (c: number) => { for (let j = 0; j < N; j++) if (MINUTES[c][j] <= maxMinutes && MINUTES[c][j] < best[j]) best[j] = MINUTES[c][j] }
+  chosen.forEach(apply)
+  while (chosen.length < count) {
+    let pick = -1
+    let pickGain = -Infinity
+    for (let c = 0; c < N; c++) {
+      if (chosen.includes(c) || (allowed && !allowed[c])) continue
+      let gain = 0
+      const row = MINUTES[c]
+      for (let j = 0; j < N; j++) {
+        if (packages[j] === 0 || row[j] > maxMinutes || row[j] >= best[j]) continue
+        gain += packages[j] * (best[j] - row[j])
+      }
+      if (gain > pickGain) { pickGain = gain; pick = c }
+    }
+    if (pick < 0) break
+    chosen.push(pick)
+    apply(pick)
+  }
+  return chosen
+}
+
+const trainingCache = new Map<string, Demand>()
+
+/** Demand per cell averaged over previous simulated days (the operation's "history"). */
+function trainingDemand(p: Params, a: Assumptions): Demand {
+  const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, p.marginLossShare, a])
   const hit = trainingCache.get(key)
   if (hit) return hit
-  const w = new Array<number>(N).fill(0)
-  for (let d = 0; d < TRAINING_DAYS; d++) {
-    const dw = weightsFrom(generateIncidents(p, a, TRAINING_SEED + d), p, a)
-    for (let j = 0; j < N; j++) w[j] += dw[j] / TRAINING_DAYS
+  const avg: Demand = { ev: new Array<number>(N).fill(0), count: new Array<number>(N).fill(0) }
+  for (let day = 0; day < TRAINING_DAYS; day++) {
+    const d = demandFrom(generateIncidents(p, a, TRAINING_SEED + day), p, a)
+    for (let j = 0; j < N; j++) { avg.ev[j] += d.ev[j] / TRAINING_DAYS; avg.count[j] += d.count[j] / TRAINING_DAYS }
   }
   if (trainingCache.size > 400) trainingCache.clear()
-  trainingCache.set(key, w)
-  return w
+  trainingCache.set(key, avg)
+  return avg
 }
 
 const placementCache = new Map<string, number[]>()
@@ -253,29 +362,39 @@ function cached(key: string, build: () => number[]) {
 export function vanCells(p: Params, a: Assumptions, incidents: Incident[]): number[] {
   if (p.vans === 0) return []
   const allowed = allowedCells(p)
-  if (p.placement === 'hindsight') return greedyPlacement(p.vans, weightsFrom(incidents, p, a), p.maxMinutes, allowed)
+  const choose = (d: Demand, initial: number[] = []) =>
+    p.objective === 'value'
+      ? valuePlacement(p.vans, d, p.maxMinutes, a.vanCapacity, p.detourCopPerMin, allowed, initial)
+      : p.objective === 'density'
+        ? densityPlacement(p.vans, d.count, p.maxMinutes, allowed, initial)
+        : greedyPlacement(p.vans, d.ev, p.maxMinutes, allowed, initial)
+  if (p.placement === 'hindsight') return choose(demandFrom(incidents, p, a))
+  const key = (tag: string) => JSON.stringify([tag, p.objective, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, a])
   if (p.placement === 'zones') {
     const anchors = ZONE_ANCHORS[p.vans]
       .map((id) => places.vanAnchors.find((v) => v.id === id)!)
       .map((an) => nearestCell(an.lat, an.lon))
       .filter((c) => allowed[c])
     // Anchors too close to the CEDI are dropped; the remaining vans go where the history says.
-    return cached(JSON.stringify(['z', p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.maxMinutes, a]),
-      () => greedyPlacement(p.vans, trainingWeights(p, a), p.maxMinutes, allowed, anchors))
+    return cached(key('zones'), () => choose(trainingDemand(p, a), anchors))
   }
-  return cached(JSON.stringify(['c', p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.maxMinutes, a]),
-    () => greedyPlacement(p.vans, trainingWeights(p, a), p.maxMinutes, allowed))
+  return cached(key('history'), () => choose(trainingDemand(p, a)))
 }
 
 export function simulate(p: Params, a: Assumptions = ASSUMPTIONS): Result {
   const incidents = generateIncidents(p, a, p.seed)
-  const cells = vanCells(p, a, incidents)
+  return simulateAt(p, a, incidents, vanCells(p, a, incidents))
+}
+
+/** Runs the day with the vans on the given cells. */
+export function simulateAt(p: Params, a: Assumptions, incidents: Incident[], cells: number[]): Result {
   const vans: VanPlacement[] = cells.map((cell, i) => ({
     name: `V${i + 1}`, lat: CELLS[cell].lat, lon: CELLS[cell].lon, cell,
     municipality: nearestMunicipality(CELLS[cell].lat, CELLS[cell].lon), handled: 0,
   }))
 
   let recovered = 0
+  let detourCost = 0
   const order = incidents.map((_, i) => i).sort((x, y) => incidents[x].hour - incidents[y].hour)
   for (const i of order) {
     const q = incidents[i]
@@ -291,10 +410,11 @@ export function simulate(p: Params, a: Assumptions = ASSUMPTIONS): Result {
     if (pick < 0 || q.grade === 'C') continue
     vans[pick].handled++
     q.vanIndex = pick
+    detourCost += 2 * pickMin * p.detourCopPerMin
     const success = q.grade === 'A' ? p.secondAttemptSuccess : a.gradeBSuccess
     if (q.roll < success) {
       q.saved = true
-      const margin = q.grade === 'A' ? a.marginA : a.marginB
+      const margin = (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
       recovered += 2 * q.cediKm * a.freightCopPerKm + a.handlingCop + q.cod * margin
     }
   }
@@ -304,6 +424,8 @@ export function simulate(p: Params, a: Assumptions = ASSUMPTIONS): Result {
   return {
     incidents, failed, saved, returned: failed - saved, recovered,
     vanCost: vans.length * a.vanCostCopPerDay,
+    detourCost,
+    net: recovered - vans.length * a.vanCostCopPerDay - detourCost,
     deadWeightTraditional: failed / p.fleet,
     deadWeightWithVans: (failed - saved) / p.fleet,
     vans,
@@ -312,5 +434,5 @@ export function simulate(p: Params, a: Assumptions = ASSUMPTIONS): Result {
 
 export const defaultParams: Params = {
   cedi: 'centro', volume: 600, fleet: 24, failureRate: 0.15, vans: 2, maxMinutes: 25,
-  secondAttemptSuccess: 0.6, minCediMinutes: 10, placement: 'concentration', seed: 7,
+  secondAttemptSuccess: 0.6, minCediMinutes: 10, marginLossShare: 0.5, detourCopPerMin: 300, placement: 'history', objective: 'value', seed: 7,
 }
