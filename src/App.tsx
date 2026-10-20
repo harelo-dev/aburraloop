@@ -83,7 +83,7 @@ export function App() {
       <header>
         <div>
           <h1>Aburrá<span>Loop</span></h1>
-          <p className="tag">Cuánto cuesta devolver al CEDI lo que no se entregó, y cuánto se rescata si una mini-van lo intercepta en la calle el mismo día.</p>
+          <p className="tag">Simulador de novedades de última milla en el Valle de Aburrá: cuánto cuestan, dónde se concentran y qué conviene hacer, desde rescatarlas con una van hasta evitarlas antes de que ocurran.</p>
         </div>
         <span className="demo">{dataInfo ? `${dataInfo.example ? 'EJEMPLO · datos inventados' : 'TUS DATOS'} · ${dataInfo.used} fallos · tiempos de viaje por carretera` : 'DEMO · datos sintéticos · tiempos de viaje por carretera'}</span>
       </header>

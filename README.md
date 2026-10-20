@@ -1,11 +1,8 @@
 # AburráLoop
 
-Simulador de última milla para comercio electrónico con pago contra entrega (COD) en el Valle de Aburrá.
+Simulador de novedades de última milla para comercio electrónico con pago contra entrega (COD) en el Valle de Aburrá: cuánto cuestan los paquetes que no se entregan, dónde y cuándo se concentran, y qué conviene hacer, desde rescatarlos con una mini-van hasta evitarlos antes de que ocurran.
 
-Compara dos modelos:
-
-- **Tradicional:** los paquetes fallidos vuelven como peso muerto al CEDI.
-- **Nodos móviles de triaje:** mini-vans pivote interceptan la novedad en la calle y re-despachan el mismo día.
+El proyecto empezó comparando dos modelos: los paquetes fallidos vuelven como peso muerto al CEDI, o mini-vans pivote los interceptan en la calle y los re-despachan el mismo día. Al medirlo, lo que más pesa resultó ser la tasa de novedad, así que hoy el simulador también mide dónde se falla más y compara palancas para reducirla.
 
 **Demo:** https://harelo-dev.github.io/aburraloop/
 
