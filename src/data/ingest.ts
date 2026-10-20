@@ -1,11 +1,13 @@
 import places from './places.json'
-import { locateCell, nearestMunicipality, type Grade, type PoolIncident, type RealData } from '../sim/simulate'
+import { locateCell, nearestMunicipality, cellCenter, type Grade, type PoolIncident, type RealData } from '../sim/simulate'
+import { HOUR_BUCKETS, WEEKDAYS, hourBucket, rateTable, shrink, weekdayOf, type ZoneRate } from './rates'
 
-export type Field = 'lat' | 'lon' | 'coords' | 'address' | 'municipality' | 'date' | 'time' | 'cod' | 'reason' | 'retry' | 'courier'
+export type Field = 'status' | 'lat' | 'lon' | 'coords' | 'address' | 'municipality' | 'date' | 'time' | 'cod' | 'reason' | 'retry' | 'courier'
 export type Mapping = Partial<Record<Field, string>>
 export type Row = Record<string, string>
 
 export const FIELD_LABELS: Record<Field, string> = {
+  status: '¿Entregado o fallido?',
   lat: 'Latitud',
   lon: 'Longitud',
   coords: 'Coordenadas en una sola columna',
@@ -23,6 +25,7 @@ export const normalize = (s: string) =>
   s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 
 const ALIASES: Record<Field, string[]> = {
+  status: ['estado', 'estado entrega', 'estado final', 'resultado', 'status', 'resultado entrega'],
   lat: ['lat', 'latitud', 'latitude'],
   lon: ['lon', 'lng', 'long', 'longitud', 'longitude'],
   coords: ['coordenadas', 'coords', 'coordinates', 'gps', 'latlon', 'lat lon', 'lat lng', 'ubicacion gps'],
@@ -35,7 +38,7 @@ const ALIASES: Record<Field, string[]> = {
   retry: ['reintento', 'segundo intento', 'resultado reintento', 'entregado reintento', 'reentrega', 'retry', 'recuperado'],
   courier: ['mensajero', 'courier', 'motorizado', 'repartidor', 'conductor', 'placa', 'driver'],
 }
-const PRIORITY: Field[] = ['lat', 'lon', 'coords', 'address', 'municipality', 'time', 'date', 'cod', 'reason', 'retry', 'courier']
+const PRIORITY: Field[] = ['status', 'lat', 'lon', 'coords', 'address', 'municipality', 'time', 'date', 'cod', 'reason', 'retry', 'courier']
 
 /** Guesses which column holds each field from the header names. Columns can be reassigned by hand afterwards. */
 export function detectMapping(headers: string[]): Mapping {
@@ -121,6 +124,17 @@ export function parseBool(text: string | undefined): boolean | null {
   return null
 }
 
+export type Status = 'delivered' | 'failed'
+
+/** Whether a row is a delivery that worked or one that failed. Null when the text says neither. */
+export function parseStatus(text: string | undefined): Status | null {
+  if (!text) return null
+  const t = normalize(text)
+  if (['fall', 'noved', 'no entreg', 'sin entreg', 'devuel', 'rechaz', 'no exit', 'failed', 'cancel', 'ausent'].some((w) => t.includes(w))) return 'failed'
+  if (['entreg', 'exito', 'deliver', 'complet', 'cumpl'].some((w) => t.includes(w)) || t === 'ok') return 'delivered'
+  return null
+}
+
 const GRADE_WORDS: [Grade, string[]][] = [
   ['C', ['averi', 'dano', 'roto', 'defect', 'equivoc', 'cambiazo', 'fraude', 'robo', 'perdid', 'extravi', 'mal estado', 'no corresponde', 'falsific']],
   ['B', ['rechaz', 'no quiere', 'no lo quiere', 'arrepent', 'cambio de opinion', 'desiste', 'sin dinero', 'no tiene dinero', 'no tiene plata', 'sin efectivo', 'precio', 'no pidio', 'no lo pidio', 'no solicito', 'cancel']],
@@ -183,6 +197,8 @@ export type Locator =
   | { kind: 'none' }
 
 export interface Prepared {
+  status: Status | null
+  municipality: string | null
   locator: Locator
   date: string | null
   hour: number | null
@@ -214,6 +230,8 @@ export function prepareRows(rows: Row[], mapping: Mapping, gradeOfReason: Record
     const reason = reasonOf(row, mapping)
     const timeText = get(row, 'time')
     return {
+      status: parseStatus(get(row, 'status')),
+      municipality: muni,
       locator,
       date: parseDate(get(row, 'date')),
       hour: parseHour(timeText),
@@ -228,10 +246,24 @@ export function prepareRows(rows: Row[], mapping: Mapping, gradeOfReason: Record
 
 export interface GeoPoint { lat: number; lon: number; quality: Exclude<Quality, 'coordinates' | 'municipality'> }
 
+export interface RateReport {
+  /** cell: every row had coordinates, so rates exist per ~1 km cell. municipality: only per municipality. */
+  level: 'cell' | 'municipality'
+  /** Delivered and failed rows that could be placed in a municipality. */
+  attempts: number
+  failures: number
+  overall: number
+  attemptsPerDay: number
+  byMunicipality: ZoneRate[]
+  byHour: ZoneRate[]
+  byWeekday: ZoneRate[]
+  cells: { lat: number; lon: number; deliveries: number; failures: number; rate: number }[]
+}
+
 export interface Report {
   rows: number
   used: number
-  excluded: { noLocation: number; outsideValley: number }
+  excluded: { noLocation: number; outsideValley: number; unknownStatus: number }
   quality: Record<Quality, number>
   days: number
   datesFound: boolean
@@ -243,13 +275,17 @@ export interface Report {
   retry: { A: { n: number; rate: number | null }; B: { n: number; rate: number | null } }
   codMean: number | null
   municipalityShare: { name: string; share: number }[]
+  /** Null when the file has no delivered/failed column: then every row is a failure and rates cannot be measured. */
+  rates: RateReport | null
 }
 
 const muniByName = (name: string) => places.municipalities.find((m) => m.name === name)!
+const CELL_PRIOR = 15
 
 /**
  * Turns the prepared rows and the geocoder's answers into the pool the simulator draws from. A row that could not be
  * placed precisely falls back to its municipality (spread over it like the synthetic data) and is counted as such.
+ * If the file says which rows were delivered, those rows only count toward the rates, never toward the failures.
  */
 export function buildData(
   fileName: string,
@@ -259,15 +295,25 @@ export function buildData(
 ): { data: RealData; report: Report } {
   const incidents: PoolIncident[] = []
   const quality: Record<Quality, number> = { coordinates: 0, house: 0, street: 0, neighbourhood: 0, municipality: 0 }
-  const excluded = { noLocation: 0, outsideValley: 0 }
+  const excluded = { noLocation: 0, outsideValley: 0, unknownStatus: 0 }
   const dates = new Set<string>()
   const couriers = new Set<string>()
   const retryTally = { A: { n: 0, ok: 0 }, B: { n: 0, ok: 0 } }
+  const hasStatus = prepared.some((r) => r.status !== null)
+  const muniAcc = new Map<string, { deliveries: number; failures: number }>()
+  const hourAcc = HOUR_BUCKETS.map(() => ({ deliveries: 0, failures: 0 }))
+  const dayAcc = WEEKDAYS.map(() => ({ deliveries: 0, failures: 0 }))
+  const cellAcc = new Map<number, { deliveries: number; failures: number; muni: string }>()
+  let rateRows = 0
+  let pointRows = 0
   let hoursFound = 0
   let codFound = 0
   let codSum = 0
 
   prepared.forEach((row, i) => {
+    const isFailure = !hasStatus || row.status === 'failed'
+    if (hasStatus && row.status === null) { excluded.unknownStatus++; return }
+
     let lat: number | null = null
     let lon: number | null = null
     let q: Quality | null = null
@@ -275,18 +321,36 @@ export function buildData(
     let municipality: string | null = null
     const loc = row.locator
     if (loc.kind === 'point') { lat = loc.lat; lon = loc.lon; q = 'coordinates' }
-    else if (loc.kind === 'address' && geo[i]) { lat = geo[i]!.lat; lon = geo[i]!.lon; q = geo[i]!.quality }
+    else if (loc.kind === 'address' && isFailure && geo[i]) { lat = geo[i]!.lat; lon = geo[i]!.lon; q = geo[i]!.quality }
     const fallback = loc.kind === 'municipality' ? loc.municipality : loc.kind === 'address' ? loc.municipality : null
     if (lat === null && fallback) {
       const m = muniByName(fallback)
       lat = m.lat; lon = m.lon; q = 'municipality'; sigmaKm = m.sigmaKm; municipality = m.name
     }
+    const cell = lat !== null && lon !== null ? locateCell(lat, lon) : null
+    if (lat !== null && lon !== null && cell !== null) municipality = municipality ?? nearestMunicipality(lat, lon)
+
+    if (hasStatus && cell !== null && municipality) {
+      // Rates: a delivered row needs a point or its municipality; a failed row counts wherever it ended up.
+      const acc = muniAcc.get(municipality) ?? { deliveries: 0, failures: 0 }
+      acc.deliveries++; if (isFailure) acc.failures++
+      muniAcc.set(municipality, acc)
+      if (row.hour !== null) { const h = hourAcc[hourBucket(row.hour)]; h.deliveries++; if (isFailure) h.failures++ }
+      if (row.date) { const d = dayAcc[weekdayOf(row.date)]; d.deliveries++; if (isFailure) d.failures++ }
+      rateRows++
+      if (q === 'coordinates') {
+        pointRows++
+        const c = cellAcc.get(cell) ?? { deliveries: 0, failures: 0, muni: municipality }
+        c.deliveries++; if (isFailure) c.failures++
+        cellAcc.set(cell, c)
+      }
+    }
+    if (!isFailure) return
+
     if (lat === null || lon === null || q === null) { excluded.noLocation++; return }
-    const cell = locateCell(lat, lon)
     if (cell === null) { excluded.outsideValley++; return }
-    municipality = municipality ?? nearestMunicipality(lat, lon)
     quality[q]++
-    incidents.push({ lat, lon, cell, sigmaKm, hour: row.hour, cod: row.cod, grade: row.grade ?? opts.defaultGrade, municipality })
+    incidents.push({ lat, lon, cell, sigmaKm, hour: row.hour, cod: row.cod, grade: row.grade ?? opts.defaultGrade, municipality: municipality! })
     if (row.date) dates.add(row.date)
     if (row.courier) couriers.add(row.courier)
     if (row.hour !== null) hoursFound++
@@ -299,8 +363,38 @@ export function buildData(
   const gradeShare = { A: 0, B: 0, C: 0 }
   incidents.forEach((x) => { gradeShare[x.grade] += 1 / total })
   const counts = places.municipalities.map((m) => incidents.filter((x) => x.municipality === m.name).length)
+  // Delivered rows can carry the dates too, and they usually cover more days than the failures alone.
+  prepared.forEach((r) => { if (hasStatus && r.date) dates.add(r.date) })
   const days = opts.daysOverride ?? (dates.size || 1)
   const rate = (t: { n: number; ok: number }) => (t.n ? t.ok / t.n : null)
+
+  let rates: RateReport | null = null
+  let exposure: RealData['exposure']
+  if (hasStatus && rateRows > 0) {
+    const level: RateReport['level'] = pointRows / rateRows >= 0.9 ? 'cell' : 'municipality'
+    const muniTable = rateTable(
+      places.municipalities.filter((m) => muniAcc.has(m.name)).map((m) => ({ key: m.id, name: m.name, ...muniAcc.get(m.name)! })),
+    )
+    const byName = new Map(muniTable.rows.map((r) => [r.name, r]))
+    const cells = level === 'cell'
+      ? [...cellAcc.entries()].map(([cell, c]) => {
+        const prior = byName.get(c.muni)?.shrunk ?? muniTable.overall
+        const r = shrink(c.failures, c.deliveries, prior, CELL_PRIOR)
+        return { cell, lat: cellCenter(cell).lat, lon: cellCenter(cell).lon, deliveries: c.deliveries, failures: c.failures, rate: r }
+      })
+      : []
+    const attempts = muniTable.rows.reduce((sum, r) => sum + r.deliveries, 0)
+    const failures = muniTable.rows.reduce((sum, r) => sum + r.failures, 0)
+    rates = {
+      level, attempts, failures, overall: muniTable.overall, attemptsPerDay: attempts / days,
+      byMunicipality: muniTable.rows.sort((a, b) => b.shrunk - a.shrunk),
+      byHour: rateTable(HOUR_BUCKETS.map((name, k) => ({ key: String(k), name, ...hourAcc[k] }))).rows,
+      byWeekday: rateTable(WEEKDAYS.map((name, k) => ({ key: String(k), name, ...dayAcc[k] })).filter((d) => d.deliveries > 0)).rows,
+      cells: cells.map(({ lat, lon, deliveries, failures: f, rate: r }) => ({ lat, lon, deliveries, failures: f, rate: r })),
+    }
+    if (level === 'cell') exposure = cells.map(({ cell, deliveries, failures: f, rate: r }) => ({ cell, deliveries, failures: f, rate: r }))
+  }
+
   const report: Report = {
     rows: prepared.length,
     used: incidents.length,
@@ -316,13 +410,16 @@ export function buildData(
     retry: { A: { n: retryTally.A.n, rate: rate(retryTally.A) }, B: { n: retryTally.B.n, rate: rate(retryTally.B) } },
     codMean: codFound ? codSum / codFound : null,
     municipalityShare: places.municipalities.map((m, k) => ({ name: m.name, share: counts[k] / total })).filter((x) => x.share > 0).sort((a, b) => b.share - a.share),
+    rates,
   }
-  const data: RealData = { id: `${fileName}:${incidents.length}:${Math.round(codSum)}:${hoursFound}`, incidents, municipalityWeights: counts.map((c) => c + 1e-9) }
+  const signature = `${incidents.length}:${Math.round(codSum)}:${hoursFound}:${exposure?.length ?? 0}:${rateRows}`
+  const data: RealData = { id: `${fileName}:${signature}`, incidents, municipalityWeights: counts.map((c) => c + 1e-9), exposure }
   return { data, report }
 }
 
 export interface Suggestion {
   failuresPerDay: number
+  dispatchesPerDay: number | null
   failureRate: number | null
   secondAttemptSuccess: number | null
   gradeBSuccess: number | null
@@ -332,19 +429,26 @@ export interface Suggestion {
 
 const MIN_RETRY_SAMPLE = 15
 
-/** What the file says about the simulator's parameters. Dispatches per day is not in a list of failures, so it is asked for. */
+/**
+ * What the file says about the simulator's parameters. A list of failures does not say how many packages went out,
+ * so that is asked for; a file with delivered and failed rows answers it by itself.
+ */
 export function suggest(report: Report, dispatchesPerDay: number | null): Suggestion {
   const failuresPerDay = report.used / report.days
+  const dispatches = report.rates ? report.rates.attemptsPerDay : dispatchesPerDay
   const warnings: string[] = []
   if (report.used < 100) warnings.push(`Solo ${report.used} fallos ubicados: la distribución espacial es poco confiable.`)
   if (report.days < 10) warnings.push(`El archivo cubre ${report.days} día${report.days === 1 ? '' : 's'}: con tan pocos días las vans se ajustan a esa muestra y el resultado se ve mejor de lo que sería.`)
   if (report.quality.municipality / Math.max(1, report.used) > 0.3) warnings.push('Más de 30% de los fallos solo se ubicó por municipio: los resultados por ubicación son aproximados.')
   if (report.hoursFound < report.used * 0.5) warnings.push('Faltan horas en más de la mitad de las filas: se completan al azar entre las 8:00 y las 16:30, y la hora decide si el reintento funciona.')
   if (report.codFound < report.used * 0.5) warnings.push('Faltan valores de pedido en más de la mitad de las filas: se completan con el rango por defecto.')
+  if (report.rates && report.rates.level === 'municipality') warnings.push('Las entregas no traen coordenadas en todas las filas: la tasa de novedad se mide por municipio, no por zona del mapa.')
+  if (report.excluded.unknownStatus > 0) warnings.push(`${report.excluded.unknownStatus} filas con un estado que no reconozco (ni entregado ni fallido) quedaron fuera.`)
   const okRate = (t: { n: number; rate: number | null }) => (t.n >= MIN_RETRY_SAMPLE ? t.rate : null)
   return {
     failuresPerDay,
-    failureRate: dispatchesPerDay ? failuresPerDay / dispatchesPerDay : null,
+    dispatchesPerDay: dispatches,
+    failureRate: report.rates ? report.rates.overall : dispatches ? failuresPerDay / dispatches : null,
     secondAttemptSuccess: okRate(report.retry.A),
     gradeBSuccess: okRate(report.retry.B),
     fleet: report.couriers,

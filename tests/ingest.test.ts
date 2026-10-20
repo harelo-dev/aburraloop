@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest'
 import Papa from 'papaparse'
 import {
   addressQueries, buildData, classifyReason, detectMapping, matchMunicipality, parseBool, parseCombinedCoords, parseDate, parseHour,
-  parseLatLon, parseMoney, prepareRows, suggest, type Row,
+  parseLatLon, parseMoney, parseStatus, prepareRows, suggest, type Row,
 } from '../src/data/ingest'
+import { sampleCsv, sampleDeliveriesCsv } from '../src/data/sample'
 import { geocodeAll, memoryCache, qualityOf } from '../src/data/geocode'
 import { ASSUMPTIONS, defaultParams, generateIncidents, simulate } from '../src/sim/simulate'
-import { meanOver } from '../src/sim/analysis'
+import { meanOver, placementComparison } from '../src/sim/analysis'
 
 describe('detecting columns', () => {
   it('recognises Spanish headers with accents and spaces', () => {
@@ -186,5 +187,67 @@ describe('the simulator on real data', () => {
   it('a better second-attempt rate recovers more', () => {
     const lo = meanOver({ ...p, secondAttemptSuccess: 0.3, gradeBSuccess: 0.3 }), hi = meanOver({ ...p, secondAttemptSuccess: 0.9, gradeBSuccess: 0.9 })
     expect(hi.recovered).toBeGreaterThan(lo.recovered)
+  })
+})
+
+describe('delivered and failed rows', () => {
+  it('reads the status column in Spanish', () => {
+    expect(parseStatus('Entregado')).toBe('delivered')
+    expect(parseStatus('No entregado')).toBe('failed')
+    expect(parseStatus('Fallido')).toBe('failed')
+    expect(parseStatus('Devuelto al CEDI')).toBe('failed')
+    expect(parseStatus('pendiente')).toBeNull()
+    expect(detectMapping(['Estado', 'Latitud', 'Longitud']).status).toBe('Estado')
+  })
+
+  const parsed = Papa.parse<Row>(sampleDeliveriesCsv(), { header: true, skipEmptyLines: 'greedy' })
+  const mapping = detectMapping(parsed.meta.fields!)
+  const rows = prepareRows(parsed.data, mapping, Object.fromEntries(parsed.data.map((r) => [r.motivo, classifyReason(r.motivo) ?? 'A'])), 'A')
+  const { data, report } = buildData('e.csv', rows, rows.map(() => null), { daysOverride: null, defaultGrade: 'A' })
+
+  it('measures rates and counts only failed rows as failures', () => {
+    expect(mapping.status).toBe('estado')
+    expect(report.rates).not.toBeNull()
+    expect(report.rates!.level).toBe('cell')
+    expect(report.used).toBe(report.rates!.failures)
+    expect(report.rates!.attempts).toBeGreaterThan(report.used * 4)
+    expect(report.rates!.overall).toBeGreaterThan(0.08)
+    expect(report.rates!.overall).toBeLessThan(0.25)
+    expect(report.days).toBe(12)
+  })
+  it('finds the places and hours that were made to fail more', () => {
+    const byName = Object.fromEntries(report.rates!.byMunicipality.map((r) => [r.name, r]))
+    expect(byName['Copacabana'].shrunk).toBeGreaterThan(byName['Envigado'].shrunk)
+    expect(byName['Envigado'].flag).toBe('low')
+    const hours = report.rates!.byHour
+    expect(hours[4].raw).toBeGreaterThan(hours[0].raw)
+  })
+  it('suggests the dispatches per day from the file, with no need to ask', () => {
+    const s = suggest(report, null)
+    expect(s.dispatchesPerDay).toBeGreaterThan(300)
+    expect(s.failureRate).toBeCloseTo(report.rates!.overall, 6)
+  })
+  it('smooths a cell with little evidence toward its municipality', () => {
+    expect(data.exposure!.length).toBeGreaterThan(50)
+    for (const e of data.exposure!) {
+      expect(e.rate).toBeGreaterThanOrEqual(0)
+      expect(e.rate).toBeLessThan(1)
+    }
+  })
+  it('places vans by tendency and compares it with history', () => {
+    const p = { ...defaultParams, vans: 2 as const, data, volume: 600, failureRate: report.rates!.overall }
+    const trend = simulate({ ...p, placement: 'trend' })
+    expect(trend.vans).toHaveLength(2)
+    expect(new Set(trend.vans.map((v) => v.cell)).size).toBe(2)
+    expect(placementComparison(p).map((r) => r.id)).toContain('trend')
+    expect(placementComparison({ ...defaultParams }).map((r) => r.id)).not.toContain('trend')
+  })
+  it('without a status column nothing is measured', () => {
+    const only = Papa.parse<Row>(sampleCsv(), { header: true, skipEmptyLines: 'greedy' })
+    const m = detectMapping(only.meta.fields!)
+    expect(m.status).toBeUndefined()
+    const r = buildData('f.csv', prepareRows(only.data, m, {}, 'A'), only.data.map(() => null), { daysOverride: null, defaultGrade: 'A' })
+    expect(r.report.rates).toBeNull()
+    expect(r.data.exposure).toBeUndefined()
   })
 })

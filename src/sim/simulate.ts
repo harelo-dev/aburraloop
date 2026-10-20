@@ -7,9 +7,11 @@ export type CediId = 'sur' | 'centro' | 'gir'
 /**
  * zones: fixed anchors (Norte, Centro, Sur).
  * history: where failures landed on 10 previous simulated days.
+ * trend: where failures are expected given each cell's deliveries and its smoothed tendency to fail. Needs a file with
+ * delivered and failed rows; a cell with few deliveries is pulled toward its municipality instead of trusted blindly.
  * hindsight: the failures of the day itself. Not achievable, kept as a ceiling.
  */
-export type Placement = 'zones' | 'history' | 'hindsight'
+export type Placement = 'zones' | 'history' | 'trend' | 'hindsight'
 /**
  * reach: each van goes where it covers the most value not yet covered by another (maximum coverage).
  * value: each van goes where it adds the most net pesos, given van capacity and the courier's detour.
@@ -42,6 +44,11 @@ export interface RealData {
   incidents: PoolIncident[]
   /** Share of failures per municipality, in the order of places.json. */
   municipalityWeights: number[]
+  /**
+   * Only when the file has delivered and failed rows with coordinates: per cell, how many deliveries and failures it
+   * had and its failure rate pulled toward its municipality's. Lets vans follow the tendency to fail, not just the counts.
+   */
+  exposure?: { cell: number; deliveries: number; failures: number; rate: number }[]
 }
 
 export interface Params {
@@ -197,6 +204,8 @@ export function nearestCell(lat: number, lon: number): number {
   }
   return best
 }
+
+export const cellCenter = (i: number) => ({ lat: CELLS[i].lat, lon: CELLS[i].lon })
 
 /** The grid cell for a point, or null if the point is farther than maxKm from every cell (outside the valley). */
 export function locateCell(lat: number, lon: number, maxKm = 3): number | null {
@@ -441,6 +450,42 @@ function cached(key: string, build: () => number[]) {
   return cells
 }
 
+/** Expected demand per cell from deliveries x smoothed failure rate, scaled to the failures of a day. Null without exposure data. */
+export function trendDemand(p: Params, a: Assumptions): Demand | null {
+  const data = p.data
+  if (!data?.exposure?.length) return null
+  const key = JSON.stringify(['trend', data.id, p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, a])
+  const hit = trendCache.get(key)
+  if (hit) return hit
+  const cediIdx = travel.origins.indexOf(`cedi:${p.cedi}`)
+  const eligible = data.incidents.filter((q) => q.grade !== 'C')
+  const eligibleShare = eligible.length / Math.max(1, data.incidents.length)
+  // What a savable failure is worth apart from the freight, which depends on the cell: odds x time of day x (handling + margin).
+  let odds = 0
+  let margin = 0
+  for (const q of eligible) {
+    const success = q.grade === 'A' ? p.secondAttemptSuccess : p.gradeBSuccess
+    odds += success * attemptFactor((q.hour ?? (a.hours[0] + a.hours[1]) / 2) + 0.2, a)
+    margin += (q.cod ?? (a.codRange[0] + a.codRange[1]) / 2) * (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
+  }
+  odds /= Math.max(1, eligible.length)
+  margin /= Math.max(1, eligible.length)
+  const weight = data.exposure.map((e) => e.deliveries * e.rate)
+  const total = weight.reduce((x, y) => x + y, 0) || 1
+  const failures = p.volume * p.failureRate
+  const d: Demand = { ev: new Array<number>(N).fill(0), count: new Array<number>(N).fill(0), all: new Array<number>(N).fill(0) }
+  data.exposure.forEach((e, k) => {
+    const all = (failures * weight[k]) / total
+    d.all[e.cell] += all
+    d.count[e.cell] += all * eligibleShare
+    d.ev[e.cell] += all * eligibleShare * odds * (2 * CELLS[e.cell].km[cediIdx] * a.freightCopPerKm + a.handlingCop + margin)
+  })
+  if (trendCache.size > 100) trendCache.clear()
+  trendCache.set(key, d)
+  return d
+}
+const trendCache = new Map<string, Demand>()
+
 export function vanCells(p: Params, a: Assumptions, incidents: Incident[]): number[] {
   if (p.vans === 0) return []
   const allowed = allowedCells(p)
@@ -453,6 +498,10 @@ export function vanCells(p: Params, a: Assumptions, incidents: Incident[]): numb
         ? densityPlacement(p.vans, d.count, p.maxMinutes, allowed, initial)
         : greedyPlacement(p.vans, d.ev, p.maxMinutes, allowed, initial)
   if (p.placement === 'hindsight') return choose(demandFrom(incidents, p, a))
+  if (p.placement === 'trend') {
+    const d = trendDemand(p, a)
+    if (d) return cached(JSON.stringify(['trend', p.objective, p.mode, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, p.data?.id, a]), () => choose(d))
+  }
   const key = (tag: string) => JSON.stringify([tag, p.mode, p.objective, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, p.data?.id, a])
   if (p.placement === 'zones') {
     const anchors = ZONE_ANCHORS[p.vans]

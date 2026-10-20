@@ -127,9 +127,23 @@ Límites que conviene tener presentes:
 - **Muestra pequeña.** Con pocos días o pocos fallos, las vans se ubican sobre la misma muestra que luego se simula, y el resultado se ve mejor de lo que sería. El panel avisa si hay menos de 100 fallos o menos de 10 días. Un archivo más largo reduce este efecto.
 - **Los días no se repiten tal cual.** Se muestrea de todos los fallos, así que no se conserva el orden ni la agrupación por día. Un día excepcionalmente malo se diluye.
 - **Ubicación aproximada.** Una dirección ubicada por calle puede quedar a más de un kilómetro de la real, y la malla es de ~1 km. Más de 30% de filas solo por municipio dispara un aviso.
+- **Los datos no dicen por qué.** Que una zona o una franja falle más muestra dónde y cuándo ocurre, no la causa. Una franja puede fallar menos por quién pide en ella, no por la hora.
 - **Fallos fuera del valle** (más de 3 km de la celda más cercana) se excluyen y se cuentan.
 - **Horas faltantes** se completan al azar entre las 8:00 y las 16:30, y la hora decide si un reintento funciona, así que sin hora la calibración es débil.
 - **Sesgo de selección.** El archivo solo trae los fallos que se registraron. Si los fallos más difíciles no se registran, el éxito del reintento sale sobrestimado.
+
+### Tasa de novedad por zona, hora y día
+
+Solo existe si el archivo dice qué filas fueron entregadas y cuáles fallidas.
+
+- **Tasa por grupo:** fallos entre entregas totales (exitosas y fallidas) de ese municipio, franja de hora o día de la semana.
+- **Ajuste por poca evidencia:** la tasa de un grupo se mezcla con la tasa general como si la general valiera por 20 entregas (`PRIOR_STRENGTH`). Un grupo de 8 entregas con 3 fallos queda cerca de la general. A cada celda de ~1 km se le aplica lo mismo, mezclándola con la tasa ajustada de su municipio y con peso de 15 entregas.
+- **Intervalo:** Wilson al 90%. Un grupo se marca como «más alto» o «más bajo de lo normal» solo si todo su intervalo queda por encima o por debajo de la tasa general.
+- **Exceso:** fallos reales menos los que daría la tasa general sobre sus entregas.
+- **Por zona del mapa:** solo si al menos 90% de las filas traen coordenadas. Con direcciones solo se buscan los fallos (las entregas serían demasiadas para un servicio que atiende una consulta por segundo), así que las tasas quedan por municipio.
+- **Filas sin estado reconocible** (ni entregado ni fallido) se excluyen y se cuentan.
+
+**Ubicar las vans por tendencia.** Ordena las celdas por entregas × tasa ajustada, reparte entre ellas los fallos esperados de un día y aplica el mismo criterio de ubicación que con el historial. Cuando hay muchos días de datos coincide casi del todo con ubicar por el historial de fallos, porque el conteo ya refleja la tasa. Aporta más con pocos días, donde el conteo crudo es ruidoso. Su principal uso está en otra parte: saber en qué zonas y horas intervenir para reducir novedades.
 
 ## Análisis de la interfaz
 

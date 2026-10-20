@@ -12,7 +12,8 @@ export const OBJECTIVE_LABEL: Record<Objective, string> = {
   density: 'Concentración de paquetes',
 }
 const rowLabel = (id: PlacementRow['id'], objective: Objective, rounds: boolean) =>
-  rounds && id === 'history-density' ? 'Historial · concentración de motos'
+  id === 'trend' ? 'Tendencia de novedad (tasa suavizada)'
+    : rounds && id === 'history-density' ? 'Historial · concentración de motos'
     : id === 'zones' ? 'Fijas por zona (Norte, Centro, Sur)'
     : id === 'hindsight' ? `Con conocimiento del día (techo)${rounds ? '' : ` · ${OBJECTIVE_LABEL[objective].toLowerCase()}`}`
       : `Historial · ${OBJECTIVE_LABEL[id.slice(8) as Objective].toLowerCase()}`
@@ -75,9 +76,10 @@ export function Analysis({ params }: { params: Params }) {
   const rowFor = (id: PlacementRow['id']) => placements.find((r) => r.id === id)!
   const zones = rowFor('zones'), hind = rowFor('hindsight')
   const rounds = deferred.mode === 'rounds'
+  const trendRow = placements.find((r) => r.id === 'trend')
   const hist = (['reach', 'value', 'density'] as const).map((o) => placements.find((r) => r.id === `history-${o}`))
   const histNow = rounds ? rowFor('history-density') : rowFor(`history-${deferred.objective}`)
-  const selectedId: PlacementRow['id'] = deferred.placement === 'zones' ? 'zones' : deferred.placement === 'hindsight' ? 'hindsight' : rounds ? 'history-density' : `history-${deferred.objective}`
+  const selectedId: PlacementRow['id'] = deferred.placement === 'zones' ? 'zones' : deferred.placement === 'hindsight' ? 'hindsight' : deferred.placement === 'trend' ? 'trend' : rounds ? 'history-density' : `history-${deferred.objective}`
   const be = [0, 1, 2].map((s) => breakEvenVolume(volume, s))
   const m2 = marginalVolume(volume, 1), m3 = marginalVolume(volume, 2)
   const fmtV = (v: number | null) => (v === null ? '' : `~${Math.round(v / 10) * 10}`)
@@ -186,6 +188,11 @@ export function Analysis({ params }: { params: Params }) {
                 {deferred.minCediMinutes > 0 && <li>Ninguna van queda a menos de {deferred.minCediMinutes} min del CEDI.</li>}
               </ul>
             </>
+          )}
+          {trendRow && (
+            <p className="take">
+              Ubicar por <b>tendencia de novedad</b> (entregas por zona y su tasa suavizada) da {copSigned(trendRow.mean.net - histNow.mean.net)} al día frente a ubicar por los fallos del historial. Con pocos días de datos la tendencia suavizada es más estable que el conteo crudo; con muchos, tienden a coincidir.
+            </p>
           )}
         </div>
 

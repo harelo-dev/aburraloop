@@ -35,17 +35,31 @@ function build(result: Result, params: Params) {
   }
 }
 
-export function MapView({ result, params }: { result: Result; params: Params }) {
+export interface RateCell { lat: number; lon: number; deliveries: number; rate: number }
+
+export function MapView({ result, params, rateCells, overall, showRates }: { result: Result; params: Params; rateCells?: RateCell[]; overall?: number; showRates?: boolean }) {
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const ready = useRef(false)
-  const latest = useRef({ result, params })
-  latest.current = { result, params }
+  const latest = useRef({ result, params, rateCells, overall, showRates })
+  latest.current = { result, params, rateCells, overall, showRates }
 
   const push = () => {
     const m = map.current
     if (!m || !ready.current) return
     const d = build(latest.current.result, latest.current.params)
+    const { rateCells: rc, overall: base, showRates: on } = latest.current
+    const h = travel.step / 2
+    const rateData = {
+      type: 'FeatureCollection' as const,
+      features: (rc ?? []).filter((c) => c.deliveries >= 5 && base).map((c) => ({
+        type: 'Feature' as const, properties: { rel: c.rate / base! },
+        geometry: { type: 'Polygon' as const, coordinates: [[[c.lon - h, c.lat - h], [c.lon + h, c.lat - h], [c.lon + h, c.lat + h], [c.lon - h, c.lat + h], [c.lon - h, c.lat - h]]] },
+      })),
+    }
+    ;(m.getSource('rates') as GeoJSONSource).setData(rateData)
+    m.setLayoutProperty('rates', 'visibility', on ? 'visible' : 'none')
+    m.setLayoutProperty('lines', 'visibility', on ? 'none' : 'visible')
     for (const k of ['blocked', 'reach', 'lines', 'couriers', 'incidents', 'vans', 'cedi'] as const) (m.getSource(k) as GeoJSONSource).setData(d[k])
   }
 
@@ -55,7 +69,11 @@ export function MapView({ result, params }: { result: Result; params: Params }) 
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     m.on('load', () => {
       const empty = { type: 'FeatureCollection' as const, features: [] }
-      for (const k of ['blocked', 'reach', 'lines', 'couriers', 'incidents', 'vans', 'cedi']) m.addSource(k, { type: 'geojson', data: empty })
+      for (const k of ['rates', 'blocked', 'reach', 'lines', 'couriers', 'incidents', 'vans', 'cedi']) m.addSource(k, { type: 'geojson', data: empty })
+      m.addLayer({
+        id: 'rates', type: 'fill', source: 'rates', layout: { visibility: 'none' },
+        paint: { 'fill-color': ['interpolate', ['linear'], ['get', 'rel'], 0.5, '#dcebe3', 1, '#f6e3a6', 1.6, '#e2806a', 2.4, '#a3231a'], 'fill-opacity': 0.62, 'fill-outline-color': 'rgba(0,0,0,0)' },
+      })
       m.addLayer({ id: 'blocked', type: 'fill', source: 'blocked', paint: { 'fill-color': '#12201d', 'fill-opacity': 0.16, 'fill-outline-color': 'rgba(0,0,0,0)' } })
       m.addLayer({ id: 'reach', type: 'fill', source: 'reach', paint: { 'fill-color': '#0b7a6b', 'fill-opacity': 0.14, 'fill-outline-color': 'rgba(0,0,0,0)' } })
       m.addLayer({ id: 'lines', type: 'line', source: 'lines', paint: { 'line-color': '#c9382c', 'line-opacity': 0.3, 'line-width': 1 } })
@@ -81,7 +99,7 @@ export function MapView({ result, params }: { result: Result; params: Params }) 
     return () => { ready.current = false; m.remove() }
   }, [])
 
-  useEffect(push, [result, params])
+  useEffect(push, [result, params, rateCells, overall, showRates])
 
   return <div ref={el} className="map" role="img" aria-label="Mapa del Valle de Aburrá con paquetes fallidos, salvados y retornados" />
 }

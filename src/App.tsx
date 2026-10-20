@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Analysis, OBJECTIVE_LABEL } from './Analysis'
 import { DataPanel, type Applied } from './DataPanel'
+import { Tendency } from './Tendency'
+import type { Report } from './data/ingest'
 import { MapView } from './MapView'
 import { ASSUMPTIONS, defaultParams, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
 import { cop, dec } from './format'
@@ -24,13 +26,19 @@ function Slider(props: { id: string; label: string; value: number; min: number; 
 export function App() {
   const [p, setP] = useState<Params>(defaultParams)
   const [dataInfo, setDataInfo] = useState<{ used: number; days: number } | null>(null)
+  const [report, setReport] = useState<Report | null>(null)
+  const [showRates, setShowRates] = useState(false)
   const useData = (a: Applied, summary: { used: number; days: number }) => {
-    setP((o) => ({ ...o, data: a.data, ...a.patch }))
+    setP((o) => ({ ...o, data: a.data, ...a.patch, placement: o.placement === 'trend' && !a.data.exposure ? 'history' : o.placement }))
     setDataInfo(summary)
+    setReport(a.report)
+    setShowRates(a.report.rates?.level === 'cell')
   }
   const clearData = () => {
-    setP((o) => ({ ...o, data: undefined }))
+    setP((o) => ({ ...o, data: undefined, placement: o.placement === 'trend' ? 'history' : o.placement }))
     setDataInfo(null)
+    setReport(null)
+    setShowRates(false)
   }
   const set = <K extends keyof Params>(k: K, v: Params[K]) => setP((o) => ({ ...o, [k]: v }))
   const r = useMemo(() => simulate(p), [p])
@@ -92,6 +100,7 @@ export function App() {
             <label htmlFor="placement">Dónde van las vans</label>
             <select id="placement" value={p.placement} disabled={p.vans === 0} onChange={(e) => set('placement', e.target.value as Placement)}>
               <option value="history">Según fallos de días previos</option>
+              <option value="trend" disabled={!p.data?.exposure}>Según tendencia de novedad{p.data?.exposure ? '' : ' (pide entregas y fallos)'}</option>
               <option value="zones">Fijas por zona</option>
               <option value="hindsight">Con conocimiento del día (techo)</option>
             </select>
@@ -125,7 +134,13 @@ export function App() {
           </div>
 
           <div className="panel mapbox">
-            <MapView result={r} params={p} />
+            {report?.rates?.level === 'cell' && (
+              <div className="seg map-toggle" role="group" aria-label="Qué mostrar en el mapa">
+                <button aria-pressed={!showRates} onClick={() => setShowRates(false)}>Fallos simulados</button>
+                <button aria-pressed={showRates} onClick={() => setShowRates(true)}>Tasa de novedad por zona</button>
+              </div>
+            )}
+            <MapView result={r} params={p} rateCells={report?.rates?.cells} overall={report?.rates?.overall} showRates={showRates} />
             <div className="legend">
               <span><i style={{ background: 'var(--accent)' }} />Salvado en calle</span>
               <span><i style={{ background: 'var(--loss)' }} />Retorno forzoso al CEDI</span>
@@ -134,6 +149,7 @@ export function App() {
                 : <span><i className="line" style={{ background: 'var(--loss)', opacity: 0.5 }} />Viaje de peso muerto (línea recta, ilustrativa)</span>}
               <span><i className="sq" />Zona que alcanzan las vans</span>
               <span><i className="sq gray" />Sin vans: demasiado cerca del CEDI</span>
+              {showRates && <span><i className="grad" />Tasa de novedad: menor → mayor que la general (zonas con 5+ entregas)</span>}
             </div>
           </div>
 
@@ -169,6 +185,8 @@ export function App() {
           </div>
         </section>
       </div>
+
+      {report?.rates && dataInfo && <Tendency rates={report.rates} days={dataInfo.days} />}
 
       <Analysis params={p} />
 

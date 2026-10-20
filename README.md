@@ -43,12 +43,15 @@ Solo la ubicación es obligatoria. Todo lo demás mejora la calibración y, si f
 | Motivo de la novedad | Se clasifica en A (reintento viable), B (liquidación flash) o C (vuelve al CEDI). La clasificación se sugiere y se puede corregir |
 | ¿Se entregó en el reintento? | Calibra el éxito del segundo intento, para A y para B |
 | Mensajero o moto | Cuenta cuántas motos tienes |
+| ¿Entregado o fallido? | Si el archivo trae **todas** las entregas y no solo los fallos, mide la tasa de novedad por municipio, por zona del mapa, por hora y por día de la semana, y calcula cuántos paquetes se despachan al día |
 
 Acepta `,` `;` tabulador o `|` como separador, decimales con punto o con coma, valores como `$ 120.000`, fechas día primero (`10/03/2026`) o ISO, horas de 24 horas o con AM/PM, y archivos UTF-8 o Windows-1252 (el «CSV» de Excel en español). Un archivo de fallos no dice cuántos paquetes se despacharon, así que ese número se pide para calcular la tasa de novedad.
 
 **Direcciones escritas.** Se pueden ubicar con [Nominatim](https://nominatim.org/) de OpenStreetMap, un servicio público que se usa a una consulta por segundo y solo si lo aceptas, porque las direcciones salen de tu navegador. Entiende calles y barrios, pero casi nunca el número de puerta, así que la ubicación es aproximada y el panel muestra cuántas filas quedaron por número, por calle, por barrio o solo por municipio. Lo ya buscado se recuerda en tu navegador, con un botón para borrarlo. Si tu archivo ya trae coordenadas, o puedes ubicarlas con otra herramienta, el resultado será más preciso.
 
-Hay un archivo de ejemplo en el mismo panel, para probarlo sin datos propios.
+**Dónde y cuándo se falla más.** Un archivo de solo fallos dice dónde hay más novedades, pero no dónde se falla más: Medellín tiene más fallos porque tiene más entregas. Con la columna de estado se calcula la **tasa** por zona. Las tasas de grupos con pocas entregas se acercan a la general, para que 8 entregas con 3 fallos no parezcan el peor lugar del valle, y cada una trae su intervalo. El mapa puede mostrar esas tasas por zona, y las vans se pueden ubicar según esa tendencia suavizada. Esto muestra **dónde y cuándo** se concentran las novedades, no **por qué**: para saber si una intervención las reduce hay que probarla.
+
+Hay dos archivos de ejemplo en el mismo panel (uno de solo fallos y otro con entregas y fallos), ambos inventados, para probarlo sin datos propios.
 
 ## Cómo funciona
 

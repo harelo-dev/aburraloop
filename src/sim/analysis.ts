@@ -70,7 +70,7 @@ export function marginalVolume(points: VolumePoint[], series: number): number | 
 }
 
 export interface PlacementRow {
-  id: 'zones' | 'history-reach' | 'history-value' | 'history-density' | 'hindsight'
+  id: 'zones' | 'history-reach' | 'history-value' | 'history-density' | 'trend' | 'hindsight'
   mean: Mean
   sites: string[]
 }
@@ -83,9 +83,10 @@ export function placementComparison(p: Params): PlacementRow[] {
     { id: 'history-reach', placement: 'history', objective: 'reach' },
     { id: 'history-value', placement: 'history', objective: 'value' },
     { id: 'history-density', placement: 'history', objective: 'density' },
+    ...(p.data?.exposure?.length ? [{ id: 'trend' as const, placement: 'trend' as const, objective: p.objective }] : []),
     { id: 'hindsight', placement: 'hindsight', objective: p.objective },
   ]
-  const used = p.mode === 'rounds' ? cases.filter((c) => c.id === 'zones' || c.id === 'history-density' || c.id === 'hindsight') : cases
+  const used = p.mode === 'rounds' ? cases.filter((c) => c.id === 'zones' || c.id === 'history-density' || c.id === 'trend' || c.id === 'hindsight') : cases
   return used.map(({ id, placement, objective }) => {
     const q = { ...p, placement, objective }
     return { id, mean: meanOver(q), sites: simulate(q).vans.map((v) => v.municipality) }

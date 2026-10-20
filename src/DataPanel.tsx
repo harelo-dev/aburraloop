@@ -5,18 +5,19 @@ import {
   type Field, type GeoPoint, type Mapping, type Report, type Row,
 } from './data/ingest'
 import { browserCache, cachedCount, geocodeAll } from './data/geocode'
-import { sampleCsv } from './data/sample'
+import { sampleCsv, sampleDeliveriesCsv } from './data/sample'
 import type { Grade, RealData } from './sim/simulate'
 import { cop } from './format'
 
 const MAX_ROWS = 20000
 const MAX_UNIQUE_ADDRESSES = 400
-const FIELDS: Field[] = ['lat', 'lon', 'coords', 'address', 'municipality', 'date', 'time', 'cod', 'reason', 'retry', 'courier']
+const FIELDS: Field[] = ['status', 'lat', 'lon', 'coords', 'address', 'municipality', 'date', 'time', 'cod', 'reason', 'retry', 'courier']
 
 /** What the file says about the simulator's parameters, ready to apply. */
 export interface Applied {
   data: RealData
   patch: { volume?: number; failureRate?: number; secondAttemptSuccess?: number; gradeBSuccess?: number; fleet?: number }
+  report: Report
 }
 
 function decode(buffer: ArrayBuffer): string {
@@ -87,7 +88,8 @@ export function DataPanel({ active, volume, onApply, onClear }: {
 
   const process = async () => {
     const prepared = prepareRows(rows, mapping, grades, 'A')
-    const needGeo = prepared.map((p, i) => (p.locator.kind === 'address' ? i : -1)).filter((i) => i >= 0)
+    // Only failures are looked up: a long list of delivered addresses would take hours at one request per second.
+    const needGeo = prepared.map((p, i) => (p.locator.kind === 'address' && p.status !== 'delivered' ? i : -1)).filter((i) => i >= 0)
     let geo: (GeoPoint | null)[] = prepared.map(() => null)
     let stopped: string | null = null
     if (needGeo.length && consent) {
@@ -112,7 +114,8 @@ export function DataPanel({ active, volume, onApply, onClear }: {
   const apply = () => {
     if (!result || !suggestion) return
     const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
-    const dispatchesPerDay = Number(dispatches) > 0 ? clamp(Math.round(Number(dispatches)), 150, 1200) : null
+    const perDay = suggestion.dispatchesPerDay ?? (Number(dispatches) > 0 ? Number(dispatches) : null)
+    const dispatchesPerDay = perDay ? clamp(Math.round(perDay), 150, 1200) : null
     const patch: Applied['patch'] = {}
     if (dispatchesPerDay) {
       patch.volume = dispatchesPerDay
@@ -121,14 +124,14 @@ export function DataPanel({ active, volume, onApply, onClear }: {
     if (suggestion.secondAttemptSuccess !== null) patch.secondAttemptSuccess = clamp(suggestion.secondAttemptSuccess, 0.1, 0.95)
     if (suggestion.gradeBSuccess !== null) patch.gradeBSuccess = clamp(suggestion.gradeBSuccess, 0.1, 0.95)
     if (suggestion.fleet !== null) patch.fleet = clamp(suggestion.fleet, 3, 80)
-    onApply({ data: result.data, patch }, { used: result.report.used, days: result.report.days })
+    onApply({ data: result.data, patch, report: result.report }, { used: result.report.used, days: result.report.days })
   }
 
   const clearCache = () => { browserCache().clear(); setCached(0) }
   const download = () => {
-    const url = URL.createObjectURL(new Blob([sampleCsv()], { type: 'text/csv;charset=utf-8' }))
+    const url = URL.createObjectURL(new Blob([sampleDeliveriesCsv()], { type: 'text/csv;charset=utf-8' }))
     const a = document.createElement('a')
-    a.href = url; a.download = 'ejemplo-novedades.csv'; a.click()
+    a.href = url; a.download = 'ejemplo-entregas.csv'; a.click()
     URL.revokeObjectURL(url)
   }
 
@@ -156,8 +159,9 @@ export function DataPanel({ active, volume, onApply, onClear }: {
             Elegir archivo CSV
             <input type="file" accept=".csv,.txt,text/csv" onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = '' }} hidden />
           </label>
-          <button className="btn ghost" onClick={() => load(sampleCsv(), 'ejemplo-novedades.csv')}>Cargar un archivo de ejemplo</button>
-          <button className="btn ghost" onClick={download}>Descargar el ejemplo</button>
+          <button className="btn ghost" onClick={() => load(sampleDeliveriesCsv(), 'ejemplo-entregas.csv')}>Ejemplo: entregas y fallos</button>
+          <button className="btn ghost" onClick={() => load(sampleCsv(), 'ejemplo-novedades.csv')}>Ejemplo: solo fallos</button>
+          <button className="btn ghost" onClick={download}>Descargar el ejemplo con entregas</button>
         </div>
         {notice && <p className="warn" role="alert">{notice}</p>}
 
@@ -202,9 +206,11 @@ export function DataPanel({ active, volume, onApply, onClear }: {
               {!mapping.date && !(mapping.time && /fecha|timestamp|datetime/i.test(mapping.time)) && (
                 <label className="map-row"><span>Días que cubre el archivo</span><input type="number" min={1} value={daysText} onChange={(e) => setDaysText(e.target.value)} placeholder="Sin fecha: dime cuántos" /></label>
               )}
-              <label className="map-row"><span>Despachos al día (con y sin novedad)</span><input type="number" min={1} value={dispatches} onChange={(e) => { setDispatches(e.target.value) }} /></label>
+              {!mapping.status && <label className="map-row"><span>Despachos al día (con y sin novedad)</span><input type="number" min={1} value={dispatches} onChange={(e) => { setDispatches(e.target.value) }} /></label>}
             </div>
-            <p className="hint">Un archivo de fallos no dice cuántos paquetes se despacharon. Con ese número calculo tu tasa de novedad.</p>
+            {mapping.status
+              ? <p className="hint">El archivo trae entregas y fallos: calcularé cuántos paquetes se despachan al día y la tasa de novedad por zona, por hora y por día de la semana. Las direcciones solo se buscan para los fallos.</p>
+              : <p className="hint">Un archivo de fallos no dice cuántos paquetes se despacharon. Con ese número calculo tu tasa de novedad. Si el archivo trae también las entregas exitosas (una columna de estado), puedo medir dónde y cuándo se falla más.</p>}
 
             {needsAddresses && (
               <label className="check consent">
@@ -228,9 +234,10 @@ export function DataPanel({ active, volume, onApply, onClear }: {
           <div className="data-result">
             <h3>Resultado</h3>
             <p>
-              <b>{result.report.used}</b> de {result.report.rows} filas quedaron ubicadas en el Valle de Aburrá en <b>{result.report.days}</b> día{result.report.days === 1 ? '' : 's'} ({suggestion.failuresPerDay.toFixed(0)} fallos por día).
+              <b>{result.report.used}</b> fallos ubicados en el Valle de Aburrá, de {result.report.rows} filas, en <b>{result.report.days}</b> día{result.report.days === 1 ? '' : 's'} ({suggestion.failuresPerDay.toFixed(0)} fallos por día).
               {result.report.excluded.noLocation > 0 && <> {result.report.excluded.noLocation} sin ubicación.</>}
               {result.report.excluded.outsideValley > 0 && <> {result.report.excluded.outsideValley} fuera del valle.</>}
+              {result.report.excluded.unknownStatus > 0 && <> {result.report.excluded.unknownStatus} con un estado que no reconozco.</>}
             </p>
             {result.stopped && <p className="warn">La búsqueda de direcciones se detuvo ({result.stopped === 'rate-limit' ? 'el servicio pidió ir más despacio' : result.stopped === 'cancelled' ? 'la cancelaste' : 'falló la red'}). Lo que no alcanzó a ubicarse quedó por municipio. Vuelve a procesar para continuar: lo ya buscado está recordado.</p>}
             <div className="quality">
@@ -243,6 +250,7 @@ export function DataPanel({ active, volume, onApply, onClear }: {
             <table className="calib">
               <thead><tr><th>Parámetro</th><th>Tu archivo</th><th>Se usará</th></tr></thead>
               <tbody>
+                {result.report.rates && <tr><td>Despachos al día</td><td>{Math.round(result.report.rates.attemptsPerDay)}</td><td>{Math.min(1200, Math.max(150, Math.round(result.report.rates.attemptsPerDay)))}</td></tr>}
                 <tr><td>Tasa de novedad</td><td>{suggestion.failureRate !== null ? pct(suggestion.failureRate) : 'falta el despacho diario'}</td><td>{suggestion.failureRate !== null ? pct(Math.min(0.4, Math.max(0.02, suggestion.failureRate))) : 'sin cambio'}</td></tr>
                 <tr><td>Éxito del 2.º intento (A)</td><td>{result.report.retry.A.rate !== null ? `${pct(result.report.retry.A.rate)} · ${result.report.retry.A.n} casos` : 'sin columna de reintento'}</td><td>{suggestion.secondAttemptSuccess !== null ? pct(suggestion.secondAttemptSuccess) : 'sin cambio'}</td></tr>
                 <tr><td>Éxito liquidación flash (B)</td><td>{result.report.retry.B.rate !== null ? `${pct(result.report.retry.B.rate)} · ${result.report.retry.B.n} casos` : 'sin columna de reintento'}</td><td>{suggestion.gradeBSuccess !== null ? pct(suggestion.gradeBSuccess) : 'sin cambio'}</td></tr>
