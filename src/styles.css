@@ -172,3 +172,28 @@ label.check.consent { background: var(--bg); border: 1px solid var(--line); bord
 .col-bar b { display: block; width: 100%; border-radius: 2px 2px 0 0; min-height: 2px; }
 .col-n { color: var(--ink); text-align: center; line-height: 1.15; margin-top: 4px; }
 .col-c { font-family: var(--mono); color: var(--muted); font-size: 10.5px; }
+
+.guided, .summary-card { padding: 0; }
+.guided > summary, .summary-card > summary { cursor: pointer; padding: 16px 18px; display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; list-style: none; }
+.guided > summary::-webkit-details-marker, .summary-card > summary::-webkit-details-marker { display: none; }
+.guided > summary::before, .summary-card > summary::before { content: "▸"; color: var(--accent); margin-right: 4px; }
+.guided[open] > summary::before, .summary-card[open] > summary::before { content: "▾"; }
+.guided > summary:focus-visible, .summary-card > summary:focus-visible, .privacy > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.steps button { font: inherit; font-size: 12.5px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 20px; background: var(--bg); color: var(--muted); cursor: pointer; }
+.steps li.on button { background: var(--accent); color: #fff; border-color: var(--accent); }
+.steps li.done button { color: var(--ink); }
+.steps button:disabled { cursor: default; opacity: .6; }
+.picks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 8px; }
+.pick { font: inherit; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); cursor: pointer; display: grid; gap: 2px; }
+.pick span { color: var(--muted); font-size: 12.5px; }
+.pick[aria-pressed=true] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.seg.two { grid-template-columns: repeat(2, 1fr); max-width: 420px; }
+.g-result { display: grid; gap: 8px; }
+.g-line { margin: 0; }
+.hint.warn-soft { border-left: 3px solid var(--c3); padding-left: 10px; }
+.json { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 12px; font-family: var(--mono); font-size: 12px; overflow-x: auto; max-height: 360px; margin: 0; white-space: pre; }
+.privacy { color: var(--muted); font-size: 13px; max-width: 80ch; }
+.privacy summary { cursor: pointer; }
+.privacy ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.mode-row { overflow-wrap: anywhere; }

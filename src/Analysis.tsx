@@ -70,7 +70,7 @@ export function Analysis({ params }: { params: Params }) {
 
   const bestN = curve.reduce((b, m, i) => (m.net > curve[b].net ? i : b), 0)
   const perRescue = curve[1].saved ? (curve[1].recovered - curve[1].detourCost) / curve[1].saved : 0
-  const rescuesToPay = perRescue ? ASSUMPTIONS.vanCostCopPerDay / perRescue : 0
+  const rescuesToPay = perRescue ? deferred.vanCostCopPerDay / perRescue : 0
   const maxNet = Math.max(...curve.map((m) => m.net), 1)
   const maxAbs = Math.max(...sens.rows.flatMap((r) => [Math.abs(r.lowDelta), Math.abs(r.highDelta)]), 1)
   const rowFor = (id: PlacementRow['id']) => placements.find((r) => r.id === id)!

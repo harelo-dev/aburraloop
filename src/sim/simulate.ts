@@ -60,6 +60,12 @@ export interface Params {
   maxMinutes: number // max road time van -> package
   secondAttemptSuccess: number // Grade A, 0..1
   gradeBSuccess: number // Grade B (flash liquidation), 0..1
+  /** Share of failures by how recoverable they are: A second attempt viable, B flash liquidation, C returns to the CEDI. Sums to 1. */
+  gradeShare: { A: number; B: number; C: number }
+  /** Average COD value of an order, in pesos. Failures drawn by the synthetic generator spread around it. */
+  codAverage: number
+  /** What it costs to run one van for a day: driver, fuel, vehicle. */
+  vanCostCopPerDay: number
   /** A van must sit at least this many road minutes from the CEDI: next to it, it intercepts nothing the CEDI would not receive anyway. */
   minCediMinutes: number
   /** Share of the product margin that is really lost when a failed package goes back to the CEDI (it can be offered again). */
@@ -77,12 +83,10 @@ export interface Params {
 }
 
 export interface Assumptions {
-  gradeShare: { A: number; B: number; C: number }
   marginA: number
   marginB: number
   freightCopPerKm: number
   handlingCop: number
-  vanCostCopPerDay: number
   vanCapacity: number
   codRange: readonly [number, number]
   hours: readonly [number, number]
@@ -97,12 +101,10 @@ export interface Assumptions {
 }
 
 export const ASSUMPTIONS: Assumptions = {
-  gradeShare: { A: 0.45, B: 0.25, C: 0.3 },
   marginA: 0.28,
   marginB: 0.12,
   freightCopPerKm: 900,
   handlingCop: 4000,
-  vanCostCopPerDay: 320_000,
   vanCapacity: 80,
   codRange: [85_000, 150_000],
   hours: [8, 16.5],
@@ -112,6 +114,9 @@ export const ASSUMPTIONS: Assumptions = {
   attemptFullUntil: 12,
   attemptNoneFrom: 17,
 }
+
+/** Midpoint of the default COD range: codAverage scales the range around it. */
+export const BASE_COD = (85_000 + 150_000) / 2
 
 export interface Incident {
   lat: number
@@ -243,7 +248,7 @@ export function generateIncidents(p: Params, a: Assumptions, seed: number): Inci
         cell = nearestCell(src.lat + dLat, src.lon + dLon)
       }
       const hour = src.hour ?? a.hours[0] + r() * (a.hours[1] - a.hours[0])
-      const cod = src.cod ?? a.codRange[0] + r() * (a.codRange[1] - a.codRange[0])
+      const cod = src.cod ?? (a.codRange[0] + r() * (a.codRange[1] - a.codRange[0])) * (p.codAverage / BASE_COD)
       out.push({
         lat: CELLS[cell].lat, lon: CELLS[cell].lon, cell, hour, cod, grade: src.grade, municipality: src.municipality,
         saved: false, vanIndex: null, cediKm: CELLS[cell].km[cediIdx], vanMinutes: null, roll: r(),
@@ -258,9 +263,9 @@ export function generateIncidents(p: Params, a: Assumptions, seed: number): Inci
     const dLon = (gauss(r) * m.sigmaKm) / (111.2 * Math.cos((m.lat * Math.PI) / 180))
     const cell = nearestCell(m.lat + dLat, m.lon + dLon)
     const g = r()
-    const grade: Grade = g < a.gradeShare.A ? 'A' : g < a.gradeShare.A + a.gradeShare.B ? 'B' : 'C'
+    const grade: Grade = g < p.gradeShare.A ? 'A' : g < p.gradeShare.A + p.gradeShare.B ? 'B' : 'C'
     const hour = a.hours[0] + r() * (a.hours[1] - a.hours[0])
-    const cod = a.codRange[0] + r() * (a.codRange[1] - a.codRange[0])
+    const cod = (a.codRange[0] + r() * (a.codRange[1] - a.codRange[0])) * (p.codAverage / BASE_COD)
     out.push({
       lat: CELLS[cell].lat, lon: CELLS[cell].lon, cell, hour, cod, grade, municipality: m.name,
       saved: false, vanIndex: null, cediKm: CELLS[cell].km[cediIdx], vanMinutes: null, roll: r(),
@@ -426,7 +431,7 @@ const trainingCache = new Map<string, Demand>()
 
 /** Demand per cell averaged over previous simulated days (the operation's "history"). */
 function trainingDemand(p: Params, a: Assumptions): Demand {
-  const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, p.data?.id, a])
+  const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, p.gradeShare, p.codAverage, p.data?.id, a])
   const hit = trainingCache.get(key)
   if (hit) return hit
   const avg: Demand = { ev: new Array<number>(N).fill(0), count: new Array<number>(N).fill(0), all: new Array<number>(N).fill(0) }
@@ -466,7 +471,7 @@ export function trendDemand(p: Params, a: Assumptions): Demand | null {
   for (const q of eligible) {
     const success = q.grade === 'A' ? p.secondAttemptSuccess : p.gradeBSuccess
     odds += success * attemptFactor((q.hour ?? (a.hours[0] + a.hours[1]) / 2) + 0.2, a)
-    margin += (q.cod ?? (a.codRange[0] + a.codRange[1]) / 2) * (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
+    margin += (q.cod ?? p.codAverage) * (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
   }
   odds /= Math.max(1, eligible.length)
   margin /= Math.max(1, eligible.length)
@@ -500,9 +505,9 @@ export function vanCells(p: Params, a: Assumptions, incidents: Incident[]): numb
   if (p.placement === 'hindsight') return choose(demandFrom(incidents, p, a))
   if (p.placement === 'trend') {
     const d = trendDemand(p, a)
-    if (d) return cached(JSON.stringify(['trend', p.objective, p.mode, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, p.data?.id, a]), () => choose(d))
+    if (d) return cached(JSON.stringify(['trend', p.objective, p.mode, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, p.gradeShare, p.codAverage, p.data?.id, a]), () => choose(d))
   }
-  const key = (tag: string) => JSON.stringify([tag, p.mode, p.objective, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, p.data?.id, a])
+  const key = (tag: string) => JSON.stringify([tag, p.mode, p.objective, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, p.gradeShare, p.codAverage, p.data?.id, a])
   if (p.placement === 'zones') {
     const anchors = ZONE_ANCHORS[p.vans]
       .map((id) => places.vanAnchors.find((v) => v.id === id)!)
@@ -557,10 +562,10 @@ export function simulateAt(p: Params, a: Assumptions, incidents: Incident[], cel
   const saved = incidents.filter((q) => q.saved).length
   return {
     incidents, failed, saved, returned: failed - saved, recovered,
-    vanCost: vans.length * a.vanCostCopPerDay,
+    vanCost: vans.length * p.vanCostCopPerDay,
     detourCost,
     tripSaving: 0,
-    net: recovered - vans.length * a.vanCostCopPerDay - detourCost,
+    net: recovered - vans.length * p.vanCostCopPerDay - detourCost,
     deadWeightTraditional: failed / p.fleet,
     deadWeightWithVans: (failed - saved) / p.fleet,
     vans,
@@ -689,7 +694,7 @@ function simulateRounds(p: Params, a: Assumptions, incidents: Incident[], cells:
 
   const failed = incidents.length
   const saved = incidents.filter((q) => q.saved).length
-  const vanCost = vans.length * a.vanCostCopPerDay
+  const vanCost = vans.length * p.vanCostCopPerDay
   return {
     incidents, failed, saved, returned: failed - saved, recovered, vanCost, detourCost: 0, tripSaving,
     net: recovered + tripSaving - vanCost,
@@ -703,5 +708,5 @@ function simulateRounds(p: Params, a: Assumptions, incidents: Incident[], cells:
 
 export const defaultParams: Params = {
   cedi: 'centro', volume: 600, fleet: 24, failureRate: 0.15, vans: 2, maxMinutes: 25,
-  secondAttemptSuccess: 0.6, gradeBSuccess: 0.8, minCediMinutes: 10, marginLossShare: 0.5, detourCopPerMin: 300, placement: 'history', objective: 'value', mode: 'intercept', skipEmptyVisits: false, seed: 7,
+  secondAttemptSuccess: 0.6, gradeBSuccess: 0.8, gradeShare: { A: 0.45, B: 0.25, C: 0.3 }, codAverage: BASE_COD, vanCostCopPerDay: 320_000, minCediMinutes: 10, marginLossShare: 0.5, detourCopPerMin: 300, placement: 'history', objective: 'value', mode: 'intercept', skipEmptyVisits: false, seed: 7,
 }

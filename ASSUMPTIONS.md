@@ -17,17 +17,29 @@ Un día de despachos de última milla con pago contra entrega (COD) en los 10 mu
 | Supuesto | Valor | Dónde |
 | --- | --- | --- |
 | Peso de envíos | Medellín 48%, Norte 24%, Sur 28% | `src/data/places.json` |
-| Mezcla de fallos | 45% Grado A, 25% Grado B, 30% Grado C | `ASSUMPTIONS.gradeShare` |
+| Mezcla de fallos | 45% Grado A, 25% Grado B, 30% Grado C (sliders) | UI |
 | Éxito 2.º intento, Grado A | 60% (slider 30–90%) | UI |
 | Éxito liquidación flash, Grado B | 80% | `ASSUMPTIONS.gradeBSuccess` |
 | Hora límite del reintento | éxito pleno hasta las 12:00, nulo desde las 17:00, lineal en medio | `attemptFullUntil`, `attemptNoneFrom` |
 | Margen del producto | 28% del COD (A), 12% (B) | `marginA`, `marginB` |
 | Parte del margen que se pierde si vuelve al CEDI | 50% (slider 10–100%) | UI |
 | Flete ahorrado | $900 por km, ida y vuelta al CEDI, más $4.000 de manejo | `freightCopPerKm`, `handlingCop` |
-| Costo de una van | $320.000 por día | `vanCostCopPerDay` |
+| Costo de una van | $320.000 por día (slider) | UI |
 | Capacidad de una van | 80 paquetes por día | `vanCapacity` |
 | Costo del desvío de la moto | $300 por minuto, ida y vuelta hacia la van (slider $0–1.500) | UI |
 | Tiempo máximo van → paquete | 25 min (slider 10–45) | UI |
+
+## Modo guiado
+
+Las respuestas se convierten en parámetros del simulador: bodega, despachos y motos, tasa de novedad, mezcla de causas (A, B y el resto como C), éxito del reintento en Grado A, valor promedio del pedido y costo de una van por día. Si das el costo mensual de una moto y sus horas efectivas, el costo por minuto sale de dividir uno entre las otras; si no, se usa $300 por minuto. Todo lo demás son los supuestos de la demo.
+
+El resultado compara 1 a 3 vans con los tres modos de operar y elige el de mayor neto por día. Si ninguno es positivo, lo dice. **El rango** mueve la tasa de novedad en ±2 puntos si la mediste (±5 si es una estimación) y el éxito del reintento en ±5 puntos (±15), y reporta el menor y el mayor de las cuatro combinaciones. Solo cubre esas dos cifras: el resto de supuestos (costos, márgenes, tiempos de viaje) no entra en el rango, y por eso el rango es optimista como medida de incertidumbre.
+
+**El costo de las novedades** es, por cada fallo, el flete de ida y vuelta al CEDI, el manejo y la parte del margen que se pierde si vuelve; se promedia sobre 8 días simulados.
+
+## Resumen del escenario
+
+Convierte cada cifra en una banda (por ejemplo, 600 despachos pasan a «500 a 699» y una tasa de 15% a «14% a 17%») y no tiene ningún campo para filas, direcciones o coordenadas. Con un archivo cargado agrega solo el tamaño en bandas: días de datos y número de fallos. Existe para mostrar la estructura de lo que se podría compartir, y hoy no se envía.
 
 ## Cuánto se recupera
 

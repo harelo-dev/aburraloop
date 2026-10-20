@@ -1,4 +1,4 @@
-import { ASSUMPTIONS, simulate, type Assumptions, type Objective, type Params, type Placement } from './simulate'
+import { ASSUMPTIONS, generateIncidents, simulate, type Assumptions, type Objective, type Params, type Placement } from './simulate'
 
 export const ANALYSIS_DAYS = 8
 
@@ -123,20 +123,20 @@ export function sensitivity(p: Params): { base: number; rows: Sensitivity[] } {
   const mlo = Math.max(5, p.maxMinutes - 10), mhi = p.maxMinutes + 10
   cases.push({ label: 'Tiempo máx. van → paquete', low: [`${mlo} min`, { ...p, maxMinutes: mlo }, A], high: [`${mhi} min`, { ...p, maxMinutes: mhi }, A] })
 
-  const shareA = (v: number) => withA({ gradeShare: { A: v, B: A.gradeShare.B, C: 1 - v - A.gradeShare.B } })
-  cases.push({ label: 'Proporción de paquetes Grado A', low: ['35%', p, shareA(0.35)], high: ['55%', p, shareA(0.55)] })
+  const withShare = (v: number): Params => ({ ...p, gradeShare: { A: v, B: p.gradeShare.B, C: Math.max(0, 1 - v - p.gradeShare.B) } })
+  const sLo = clamp(p.gradeShare.A - 0.1, 0.05, 0.9 - p.gradeShare.B), sHi = clamp(p.gradeShare.A + 0.1, 0.05, 0.9 - p.gradeShare.B)
+  cases.push({ label: 'Proporción de paquetes Grado A', low: [pct(sLo), withShare(sLo), A], high: [pct(sHi), withShare(sHi), A] })
 
   const blo = clamp(p.gradeBSuccess - 0.15, 0.1, 0.95), bhi = clamp(p.gradeBSuccess + 0.15, 0.1, 0.95)
   cases.push({ label: 'Éxito Grado B (liquidación flash)', low: [pct(blo), { ...p, gradeBSuccess: blo }, A], high: [pct(bhi), { ...p, gradeBSuccess: bhi }, A] })
   cases.push({ label: 'Margen del producto (Grado A)', low: ['20%', p, withA({ marginA: 0.2 })], high: ['36%', p, withA({ marginA: 0.36 })] })
-  cases.push({ label: 'Costo de una van por día', low: [cop(A.vanCostCopPerDay * 0.75), p, withA({ vanCostCopPerDay: A.vanCostCopPerDay * 0.75 })], high: [cop(A.vanCostCopPerDay * 1.25), p, withA({ vanCostCopPerDay: A.vanCostCopPerDay * 1.25 })] })
+  cases.push({ label: 'Costo de una van por día', low: [cop(p.vanCostCopPerDay * 0.75), { ...p, vanCostCopPerDay: p.vanCostCopPerDay * 0.75 }, A], high: [cop(p.vanCostCopPerDay * 1.25), { ...p, vanCostCopPerDay: p.vanCostCopPerDay * 1.25 }, A] })
   cases.push({ label: 'Costo del flete por km', low: [`$${A.freightCopPerKm * 2 / 3}`, p, withA({ freightCopPerKm: A.freightCopPerKm * 2 / 3 })], high: [`$${A.freightCopPerKm * 4 / 3}`, p, withA({ freightCopPerKm: A.freightCopPerKm * 4 / 3 })] })
   const mlsLo = clamp(p.marginLossShare - 0.25, 0.1, 1), mlsHi = clamp(p.marginLossShare + 0.25, 0.1, 1)
   cases.push({ label: 'Margen que se pierde si vuelve al CEDI', low: [pct(mlsLo), { ...p, marginLossShare: mlsLo }, A], high: [pct(mlsHi), { ...p, marginLossShare: mlsHi }, A] })
   cases.push({ label: 'Costo del desvío de la moto por minuto', low: ['$150', { ...p, detourCopPerMin: 150 }, A], high: ['$450', { ...p, detourCopPerMin: 450 }, A] })
   cases.push({ label: 'Capacidad de la van', low: ['40 pq', p, withA({ vanCapacity: 40 })], high: ['120 pq', p, withA({ vanCapacity: 120 })] })
-  const codScale = (s: number) => withA({ codRange: [A.codRange[0] * s, A.codRange[1] * s] })
-  cases.push({ label: 'Valor COD de los paquetes', low: ['−20%', p, codScale(0.8)], high: ['+20%', p, codScale(1.2)] })
+  cases.push({ label: 'Valor COD de los paquetes', low: ['−20%', { ...p, codAverage: p.codAverage * 0.8 }, A], high: ['+20%', { ...p, codAverage: p.codAverage * 1.2 }, A] })
 
   const rows = cases.map((c) => {
     const lowDelta = meanOver(c.low[1], ANALYSIS_DAYS, c.low[2]).net - base
@@ -162,4 +162,66 @@ export function modeComparison(p: Params): ModeRow[] {
     rounds: meanOver({ ...p, vans, mode: 'rounds', skipEmptyVisits: false }),
     roundsPending: meanOver({ ...p, vans, mode: 'rounds', skipEmptyVisits: true }),
   }))
+}
+
+/** What the failed deliveries of an average day cost before any van: freight both ways, handling and the share of margin that is lost. */
+export function failureCost(p: Params, a: Assumptions = ASSUMPTIONS, days = ANALYSIS_DAYS): { perFailure: number; perDay: number } {
+  let total = 0
+  let count = 0
+  for (let d = 0; d < days; d++) {
+    for (const q of generateIncidents({ ...p, seed: p.seed + d }, a, p.seed + d)) {
+      const margin = q.grade === 'A' ? a.marginA : q.grade === 'B' ? a.marginB : 0
+      total += 2 * q.cediKm * a.freightCopPerKm + a.handlingCop + q.cod * margin * p.marginLossShare
+      count++
+    }
+  }
+  return { perFailure: count ? total / count : 0, perDay: total / days }
+}
+
+export type Config = 'intercept' | 'rounds' | 'roundsPending'
+
+export interface Best {
+  /** none: no van setup earns more than it costs. */
+  config: Config | 'none'
+  vans: number
+  net: number
+  rows: ModeRow[]
+}
+
+/** The mode and number of vans with the highest net per day, among 1 to 3 vans and the three ways of operating. */
+export function bestConfig(p: Params): Best {
+  const rows = modeComparison(p)
+  let best: Best = { config: 'none', vans: 0, net: 0, rows }
+  for (const row of rows) {
+    for (const config of ['intercept', 'rounds', 'roundsPending'] as const) {
+      if (row[config].net > best.net) best = { config, vans: row.vans, net: row[config].net, rows }
+    }
+  }
+  return best
+}
+
+export const withConfig = (p: Params, config: Config, vans: number): Params => ({
+  ...p,
+  vans: vans as Params['vans'],
+  mode: config === 'intercept' ? 'intercept' : 'rounds',
+  skipEmptyVisits: config === 'roundsPending',
+})
+
+/**
+ * Net per day of one setup when two of the least certain inputs are off: the failure rate by `ratePoints` and the
+ * second-attempt success by `retryPoints`. Returns the lowest and highest of the four corners.
+ */
+export function netRange(p: Params, config: Config, vans: number, ratePoints: number, retryPoints: number): [number, number] {
+  const base = withConfig(p, config, vans)
+  const nets: number[] = []
+  for (const dr of [-ratePoints, ratePoints]) {
+    for (const dp of [-retryPoints, retryPoints]) {
+      nets.push(meanOver({
+        ...base,
+        failureRate: Math.min(0.4, Math.max(0.02, base.failureRate + dr / 100)),
+        secondAttemptSuccess: Math.min(0.95, Math.max(0.1, base.secondAttemptSuccess + dp / 100)),
+      }).net)
+    }
+  }
+  return [Math.min(...nets), Math.max(...nets)]
 }

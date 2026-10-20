@@ -30,9 +30,11 @@ function decode(buffer: ArrayBuffer): string {
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
-export function DataPanel({ active, volume, onApply, onClear }: {
+export function DataPanel({ active, volume, open, onToggle, onApply, onClear }: {
   active: { used: number; days: number } | null
   volume: number
+  open: boolean
+  onToggle: (open: boolean) => void
   onApply: (a: Applied, summary: { used: number; days: number }) => void
   onClear: () => void
 }) {
@@ -143,7 +145,7 @@ export function DataPanel({ active, volume, onApply, onClear }: {
         <button className="btn ghost danger" onClick={onClear}>Volver a datos sintéticos</button>
       </div>
     )}
-    <details className="panel data-panel" open={!active}>
+    <details className="panel data-panel" open={open} onToggle={(e) => onToggle(e.currentTarget.open)}>
       <summary>
         <span className="data-title">{active ? 'Cambiar los datos' : 'Usa tus propios datos'}</span>
         <span className="data-sub">{active ? 'Carga otro CSV' : 'Carga un CSV con tus paquetes fallidos'}</span>

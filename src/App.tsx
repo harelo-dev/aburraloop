@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { Analysis, OBJECTIVE_LABEL } from './Analysis'
 import { DataPanel, type Applied } from './DataPanel'
 import { Tendency } from './Tendency'
+import { Guided } from './Guided'
+import { ScenarioSummary } from './ScenarioSummary'
 import type { Report } from './data/ingest'
 import { MapView } from './MapView'
 import { ASSUMPTIONS, defaultParams, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
@@ -28,11 +30,36 @@ export function App() {
   const [dataInfo, setDataInfo] = useState<{ used: number; days: number } | null>(null)
   const [report, setReport] = useState<Report | null>(null)
   const [showRates, setShowRates] = useState(false)
+  const [guidedOpen, setGuidedOpen] = useState(true)
+  const [csvOpen, setCsvOpen] = useState(false)
+  const [origin, setOrigin] = useState<'demo' | 'guided'>('demo')
+  /** Moving one cause keeps the three shares adding up to 100%: the other cause gives way before the returns do. */
+  const setShare = (which: 'A' | 'B', v: number) => {
+    setP((o) => {
+      const other = which === 'A' ? o.gradeShare.B : o.gradeShare.A
+      const o2 = Math.min(other, 1 - v)
+      const A = which === 'A' ? v : o2
+      const B = which === 'B' ? v : o2
+      return { ...o, gradeShare: { A, B, C: Math.max(0, 1 - A - B) } }
+    })
+  }
   const useData = (a: Applied, summary: { used: number; days: number }) => {
     setP((o) => ({ ...o, data: a.data, ...a.patch, placement: o.placement === 'trend' && !a.data.exposure ? 'history' : o.placement }))
     setDataInfo(summary)
     setReport(a.report)
     setShowRates(a.report.rates?.level === 'cell')
+    setCsvOpen(false)
+    setGuidedOpen(false)
+  }
+  const useGuided = (guided: Params) => {
+    setP({ ...guided, data: undefined })
+    setOrigin('guided')
+    setGuidedOpen(false)
+    requestAnimationFrame(() => document.querySelector('.grid')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }))
+  }
+  const csvFromGuided = () => {
+    setGuidedOpen(false)
+    setCsvOpen(true)
   }
   const clearData = () => {
     setP((o) => ({ ...o, data: undefined, placement: o.placement === 'trend' ? 'history' : o.placement }))
@@ -60,7 +87,8 @@ export function App() {
         <span className="demo">{dataInfo ? `TUS DATOS · ${dataInfo.used} fallos · tiempos de viaje por carretera` : 'DEMO · datos sintéticos · tiempos de viaje por carretera'}</span>
       </header>
 
-      <DataPanel active={dataInfo} volume={p.volume} onApply={useData} onClear={clearData} />
+      {!dataInfo && <Guided open={guidedOpen} onToggle={setGuidedOpen} onApply={useGuided} onCsv={csvFromGuided} />}
+      <DataPanel active={dataInfo} volume={p.volume} open={csvOpen} onToggle={setCsvOpen} onApply={useData} onClear={clearData} />
 
       <div className="grid">
         <aside className="panel" aria-label="Parámetros">
@@ -120,6 +148,11 @@ export function App() {
           <p className="hint tight">Un paquete devuelto puede reofrecerse. Solo cuenta la parte de la venta que se pierde.</p>
           <Slider id="detour" label="Costo del desvío de la moto" value={p.detourCopPerMin} min={0} max={1500} step={50} out={`$${p.detourCopPerMin}/min`} onChange={(v) => set('detourCopPerMin', v)} />
           <p className="hint tight">Lo que cuesta cada minuto que una moto se desvía hacia la van, ida y vuelta. Más caro, más conviene tener la van cerca de la concentración.</p>
+          <Slider id="shareA" label="Fallos por cliente ausente o sin respuesta (A)" value={Math.round(p.gradeShare.A * 100)} min={5} max={90} step={5} out={`${Math.round(p.gradeShare.A * 100)}%`} onChange={(v) => setShare('A', v / 100)} />
+          <Slider id="shareB" label="Fallos por rechazo o sin efectivo (B)" value={Math.round(p.gradeShare.B * 100)} min={0} max={90} step={5} out={`${Math.round(p.gradeShare.B * 100)}%`} onChange={(v) => setShare('B', v / 100)} />
+          <p className="hint tight">El resto ({Math.round(p.gradeShare.C * 100)}%) son averías o cambios (C): vuelven al CEDI.</p>
+          <Slider id="cod" label="Valor promedio del pedido" value={Math.round(p.codAverage / 1000)} min={40} max={400} step={5} out={cop(p.codAverage)} onChange={(v) => set('codAverage', v * 1000)} />
+          <Slider id="vanCost" label="Costo de una van por día" value={Math.round(p.vanCostCopPerDay / 10000)} min={10} max={80} step={1} out={cop(p.vanCostCopPerDay)} onChange={(v) => set('vanCostCopPerDay', v * 10000)} />
           <Slider id="pB" label="Éxito de la liquidación flash (Grado B)" value={Math.round(p.gradeBSuccess * 100)} min={10} max={95} step={5} out={`${Math.round(p.gradeBSuccess * 100)}%`} onChange={(v) => set('gradeBSuccess', v / 100)} />
           <Slider id="p2" label="Éxito del 2.º intento (Grado A)" value={Math.round(p.secondAttemptSuccess * 100)} min={10} max={95} step={5} out={`${Math.round(p.secondAttemptSuccess * 100)}%`} onChange={(v) => set('secondAttemptSuccess', v / 100)} />
           <button className="reroll" onClick={() => set('seed', (p.seed * 31 + 11) % 100000)}>Simular otro día</button>
@@ -129,7 +162,7 @@ export function App() {
           <div className="kpis" aria-live="polite">
             <div className="kpi"><div className="k">Retorno físico evitado</div><div className="v good">{pct.toFixed(0)}%</div><div className="s">{r.saved} de {r.failed} fallidos</div></div>
             <div className="kpi"><div className="k">Capital recuperado / día</div><div className={`v ${net >= 0 ? 'good' : 'bad'}`}>{cop(r.recovered)}</div><div className="s">{p.vans ? `${p.mode === 'rounds' ? `neto, con ahorro de cierre ${cop(r.tripSaving)}` : 'neto de vans y desvíos'}: ${net < 0 ? '−' : ''}${cop(Math.abs(net))}` : 'sin vans no hay rescate'}</div></div>
-            <div className="kpi"><div className="k">Costo de las vans / día</div><div className="v">{cop(r.vanCost)}</div><div className="s">{p.vans} × {cop(ASSUMPTIONS.vanCostCopPerDay)}{p.mode === 'rounds' ? ` · visitas ${r.visits.done}/${r.visits.done + r.visits.skipped}` : ` · desvíos ${cop(r.detourCost)}`}</div></div>
+            <div className="kpi"><div className="k">Costo de las vans / día</div><div className="v">{cop(r.vanCost)}</div><div className="s">{p.vans} × {cop(p.vanCostCopPerDay)}{p.mode === 'rounds' ? ` · visitas ${r.visits.done}/${r.visits.done + r.visits.skipped}` : ` · desvíos ${cop(r.detourCost)}`}</div></div>
             <div className="kpi"><div className="k">Peso muerto por moto</div><div className="v">{dec(r.deadWeightWithVans)}</div><div className="s">antes {dec(r.deadWeightTraditional)} pq/moto</div></div>
           </div>
 
@@ -169,12 +202,12 @@ export function App() {
           <div className="panel">
             <h2>Supuestos del modelo</h2>
             <div className="assume">
-              <div>Mezcla de fallos: <b>45% A · 25% B · 30% C</b></div>
+              <div>Mezcla de fallos: <b>{Math.round(p.gradeShare.A * 100)}% A · {Math.round(p.gradeShare.B * 100)}% B · {Math.round(p.gradeShare.C * 100)}% C</b></div>
               <div>Éxito Grado B (flash): <b>{Math.round(p.gradeBSuccess * 100)}%</b></div>
               <div>Margen A / B: <b>28% / 12% del COD</b>, de lo cual se pierde <b>{Math.round(p.marginLossShare * 100)}%</b> al volver</div>
               <div>Desvío de la moto: <b>${p.detourCopPerMin}/min</b>, ida y vuelta a la van</div>
               <div>Flete ahorrado: <b>${ASSUMPTIONS.freightCopPerKm}/km ida y vuelta + ${ASSUMPTIONS.handlingCop / 1000}k manejo</b></div>
-              <div>Costo por van/día: <b>{cop(ASSUMPTIONS.vanCostCopPerDay)}</b></div>
+              <div>Costo por van/día: <b>{cop(p.vanCostCopPerDay)}</b></div>
               <div>Capacidad por van: <b>{ASSUMPTIONS.vanCapacity} paquetes/día</b></div>
               <div>Tiempos de viaje: <b>{travel.cells.length} celdas de ~1 km, OSRM (carro)</b></div>
               <div>Operación: <b>{p.mode === 'rounds' ? `la van visita a cada moto a las ${ASSUMPTIONS.amWindow[0]}–${ASSUMPTIONS.amWindow[1]} y ${ASSUMPTIONS.pmWindow[0]}–${ASSUMPTIONS.pmWindow[1]} h, ${ASSUMPTIONS.handoffMinutes} min por visita` : 'intercepta fallos dentro de su alcance'}</b></div>
@@ -189,6 +222,18 @@ export function App() {
       {report?.rates && dataInfo && <Tendency rates={report.rates} days={dataInfo.days} />}
 
       <Analysis params={p} />
+
+      <ScenarioSummary params={p} origin={dataInfo ? 'archivo propio' : origin === 'guided' ? 'estimaciones del modo guiado' : 'valores de la demo'} report={report} />
+
+      <details className="privacy">
+        <summary>Privacidad: qué pasa con lo que escribes y cargas</summary>
+        <ul>
+          <li>Este sitio no tiene servidor propio: <b>no recoge, no guarda y no envía</b> lo que escribes ni los archivos que cargas. Todo se calcula en tu navegador.</li>
+          <li>Tu navegador sí se conecta a terceros para mostrar la página: GitHub Pages (el sitio), OpenFreeMap y OpenStreetMap (el mapa) y Google Fonts (las tipografías). Ellos ven tu dirección IP, como en cualquier página web.</li>
+          <li>Solo si activas «ubicar las direcciones», las direcciones de los fallos se envían a Nominatim (OpenStreetMap). Se recuerdan en este navegador hasta que las borres.</li>
+          <li>El resumen del escenario es para que lo veas y lo copies. No se envía a ningún lado.</li>
+        </ul>
+      </details>
 
       <footer>
         {dataInfo

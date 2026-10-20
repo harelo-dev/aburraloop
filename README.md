@@ -28,6 +28,22 @@ La van puede operar de dos formas: **interceptar** los fallos en la calle, o **r
 
 Los parámetros de entrada son el CEDI base, el volumen diario (150–1.200), la flota (5–45 motos), la tasa de novedad (5–30%) y de 0 a 3 mini-vans. Además se ajustan el tiempo máximo de viaje de la van, la distancia mínima de la van al CEDI, el éxito del segundo intento, qué parte del margen se pierde si un paquete vuelve al CEDI y el costo del desvío de la moto.
 
+## Modo guiado
+
+Para quien no tiene un archivo a mano: cinco preguntas (bodega, volumen y motos, tasa de novedad, causas de los fallos, costos) y el resultado en palabras: cuánto cuestan tus novedades, cuánto ahorraría bajar un punto la tasa de novedad, y cuál es la mejor configuración de van, con un rango. El rango sale de mover dos de las cifras menos seguras, la tasa de novedad y el éxito del reintento, más si dices que son estimaciones que si las mediste. Al final se puede llevar todo al simulador completo para explorarlo.
+
+Las cifras son las que escribes, no medidas, y el resultado lo dice.
+
+## Resumen del escenario
+
+Al final de la página hay un resumen de lo que dice el escenario actual, en rangos y no en cifras exactas, que puedes copiar o descargar como `.json`. **No se envía a ningún lado.** Nunca incluye las filas de tu archivo, direcciones, coordenadas, nombres ni teléfonos. Está para que veas qué contiene un escenario y lo compartas tú si quieres.
+
+## Privacidad
+
+- No hay servidor propio: el sitio no recoge, no guarda y no envía lo que escribes ni los archivos que cargas. Todo se calcula en el navegador.
+- El navegador sí se conecta a terceros para mostrar la página: GitHub Pages (el sitio), OpenFreeMap y OpenStreetMap (el mapa) y Google Fonts (las tipografías). Ven la dirección IP, como en cualquier página web.
+- Solo si activas «ubicar las direcciones», las direcciones de los fallos se envían a Nominatim (OpenStreetMap), y se recuerdan en el navegador hasta que las borres.
+
 ## Usar tus propios datos
 
 El panel «Usa tus propios datos» carga un CSV con tus paquetes fallidos y calibra el simulador con ellos. **El archivo se procesa en tu navegador y no se sube a ningún servidor.** Quita nombres y teléfonos antes de cargar: el simulador no los necesita.
