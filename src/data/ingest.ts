@@ -41,7 +41,9 @@ const ALIASES: Record<Field, string[]> = {
 const PRIORITY: Field[] = ['status', 'lat', 'lon', 'coords', 'address', 'municipality', 'time', 'date', 'cod', 'reason', 'retry', 'courier']
 
 /** Guesses which column holds each field from the header names. Columns can be reassigned by hand afterwards. */
-export function detectMapping(headers: string[]): Mapping {
+const AMBIGUOUS = ['ubicacion', 'location', 'localizacion', 'punto', 'ubicacion entrega']
+
+export function detectMapping(headers: string[], sample?: Row[]): Mapping {
   const norm = headers.map(normalize)
   const mapping: Mapping = {}
   const used = new Set<number>()
@@ -50,6 +52,16 @@ export function detectMapping(headers: string[]): Mapping {
     for (const exact of [true, false]) {
       const i = norm.findIndex((h, k) => (field === 'date' || field === 'time' ? true : !used.has(k)) && ALIASES[field].some((al) => (exact ? h === al : wordIn(h, al))))
       if (i >= 0) { mapping[field] = headers[i]; if (field !== 'date' && field !== 'time') used.add(i); break }
+    }
+  }
+  // A column called "ubicación" can hold coordinates or an address: the values decide.
+  if (sample?.length) {
+    const i = norm.findIndex((h, k) => !used.has(k) && AMBIGUOUS.some((al) => h === al || wordIn(h, al)))
+    if (i >= 0) {
+      const values = sample.slice(0, 50).map((r) => r[headers[i]]).filter((v) => v && v.trim())
+      const coordShare = values.length ? values.filter((v) => parseCombinedCoords(v)).length / values.length : 0
+      if (coordShare >= 0.6) { if (!mapping.coords && !(mapping.lat && mapping.lon)) mapping.coords = headers[i] }
+      else if (!mapping.address) mapping.address = headers[i]
     }
   }
   // A coordinates column makes separate lat/lon redundant, but never the other way around.

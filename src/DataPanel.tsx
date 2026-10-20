@@ -60,7 +60,19 @@ export function DataPanel({ active, volume, open, onToggle, onApply, onClear }: 
   }, [rows, mapping])
 
   const hasPoint = (mapping.lat && mapping.lon) || mapping.coords
-  const needsAddresses = !hasPoint && !!mapping.address
+  // How each row will be placed, worked out before anything is searched, so nothing happens silently.
+  const plan = useMemo(() => {
+    const prepared = prepareRows(rows, mapping, grades, 'A')
+    const count = { point: 0, address: 0, municipality: 0, none: 0 }
+    const chains = new Set<string>()
+    prepared.forEach((r) => {
+      if (r.locator.kind === 'address' && r.status !== 'delivered') { count.address++; chains.add(r.locator.queries.join('|')) }
+      else if (r.locator.kind === 'address') count[r.locator.municipality ? 'municipality' : 'none']++
+      else count[r.locator.kind]++
+    })
+    return { ...count, distinct: chains.size }
+  }, [rows, mapping, grades])
+  const needsAddresses = plan.address > 0
 
   const load = (text: string, name: string) => {
     const parsed = Papa.parse<Row>(text.replace(/^﻿/, ''), {
@@ -69,7 +81,7 @@ export function DataPanel({ active, volume, open, onToggle, onApply, onClear }: 
     const fields = (parsed.meta.fields ?? []).filter(Boolean)
     if (!fields.length || !parsed.data.length) { setNotice('No encontré filas con encabezados en ese archivo.'); return }
     const data = parsed.data.slice(0, MAX_ROWS)
-    const m = detectMapping(fields)
+    const m = detectMapping(fields, data)
     setFileName(name); setHeaders(fields); setRows(data); setMapping(m); setResult(null); setProgress(null)
     setGrades(Object.fromEntries(data.map((r) => reasonOf(r, m)).filter(Boolean).map((t) => [t, classifyReason(t) ?? 'A'])))
     setNotice(parsed.data.length > MAX_ROWS ? `El archivo tiene ${parsed.data.length} filas: usé las primeras ${MAX_ROWS}.` : '')
@@ -182,7 +194,16 @@ export function DataPanel({ active, volume, open, onToggle, onApply, onClear }: 
               ))}
             </div>
             {!hasPoint && !mapping.address && !mapping.municipality && <p className="warn">Necesito una ubicación: coordenadas, una dirección o al menos el municipio.</p>}
-            {hasPoint && <p className="hint">Se usarán las coordenadas. Una dirección solo se busca cuando una fila no trae coordenadas válidas.</p>}
+            <div className="plan" role="status">
+              <b>Cómo se ubicará cada fila</b>
+              <ul>
+                {plan.point > 0 && <li><b>{plan.point}</b> con coordenadas: se usan tal cual.</li>}
+                {plan.address > 0 && <li><b>{plan.address}</b> con dirección escrita ({plan.distinct} distintas): {consent ? 'se buscarán en OpenStreetMap, una por segundo' : 'necesitan tu permiso (abajo) para buscarlas; sin él quedan por municipio'}.</li>}
+                {plan.municipality > 0 && <li><b>{plan.municipality}</b> solo con municipio: quedan repartidas alrededor de su centro.</li>}
+                {plan.none > 0 && <li><b>{plan.none}</b> sin ubicación: quedan fuera.</li>}
+              </ul>
+              <span className="hint">Una dirección solo se busca si la fila no trae coordenadas válidas. Si una columna de dirección trae coordenadas, se reconocen y no se envía nada.</span>
+            </div>
 
             {reasons.length > 0 && (
               <>
@@ -218,7 +239,7 @@ export function DataPanel({ active, volume, open, onToggle, onApply, onClear }: 
               <label className="check consent">
                 <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
                 <span>
-                  Ubicar las direcciones enviándolas a OpenStreetMap (Nominatim), una por segundo. Entiende calles y barrios, pero casi nunca el número de puerta, así que la ubicación es aproximada.
+                  Ubicar las {plan.address} direcciones enviándolas a OpenStreetMap (Nominatim), una por segundo (unos {Math.ceil(plan.distinct * 1.1)} s). Entiende calles y barrios, pero casi nunca el número de puerta, así que la ubicación es aproximada.
                   Sin esto, las filas se ubican solo por municipio.{cached > 0 && <> Hay {cached} direcciones recordadas en este navegador. <button type="button" className="link" onClick={clearCache}>Borrarlas</button>.</>}
                 </span>
               </label>

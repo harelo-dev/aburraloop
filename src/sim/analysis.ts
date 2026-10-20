@@ -1,4 +1,4 @@
-import { ASSUMPTIONS, generateIncidents, simulate, type Assumptions, type Objective, type Params, type Placement } from './simulate'
+import { ASSUMPTIONS, generateIncidents, simulate, type Assumptions, type Grade, type Objective, type Params, type Placement } from './simulate'
 
 export const ANALYSIS_DAYS = 8
 
@@ -164,18 +164,42 @@ export function modeComparison(p: Params): ModeRow[] {
   }))
 }
 
-/** What the failed deliveries of an average day cost before any van: freight both ways, handling and the share of margin that is lost. */
-export function failureCost(p: Params, a: Assumptions = ASSUMPTIONS, days = ANALYSIS_DAYS): { perFailure: number; perDay: number } {
-  let total = 0
-  let count = 0
+export interface FailureValues {
+  /** Pesos a day that the failed deliveries cost before any van. */
+  perDay: number
+  perFailure: number
+  failuresPerDay: number
+  /** Per grade: failures a day and the pesos that avoiding one of them is worth. */
+  byGrade: Record<Grade, { perDay: number; value: number }>
+  /** Share of the failures that happen from 14:00 on. */
+  lateShare: number
+}
+
+/**
+ * What a failed delivery costs, by grade: freight both ways, handling and the share of margin that is lost when it
+ * goes back to the CEDI. Averaged over simulated days.
+ */
+export function failureValues(p: Params, a: Assumptions = ASSUMPTIONS, days = ANALYSIS_DAYS): FailureValues {
+  const sum: Record<Grade, { n: number; v: number }> = { A: { n: 0, v: 0 }, B: { n: 0, v: 0 }, C: { n: 0, v: 0 } }
+  let late = 0
   for (let d = 0; d < days; d++) {
     for (const q of generateIncidents({ ...p, seed: p.seed + d }, a, p.seed + d)) {
       const margin = q.grade === 'A' ? a.marginA : q.grade === 'B' ? a.marginB : 0
-      total += 2 * q.cediKm * a.freightCopPerKm + a.handlingCop + q.cod * margin * p.marginLossShare
-      count++
+      sum[q.grade].n++
+      sum[q.grade].v += 2 * q.cediKm * a.freightCopPerKm + a.handlingCop + q.cod * margin * p.marginLossShare
+      if (q.hour >= 14) late++
     }
   }
-  return { perFailure: count ? total / count : 0, perDay: total / days }
+  const n = sum.A.n + sum.B.n + sum.C.n
+  const v = sum.A.v + sum.B.v + sum.C.v
+  const grade = (g: Grade) => ({ perDay: sum[g].n / days, value: sum[g].n ? sum[g].v / sum[g].n : 0 })
+  return { perDay: v / days, perFailure: n ? v / n : 0, failuresPerDay: n / days, byGrade: { A: grade('A'), B: grade('B'), C: grade('C') }, lateShare: n ? late / n : 0 }
+}
+
+/** What the failed deliveries of an average day cost before any van. */
+export function failureCost(p: Params, a: Assumptions = ASSUMPTIONS, days = ANALYSIS_DAYS): { perFailure: number; perDay: number } {
+  const v = failureValues(p, a, days)
+  return { perFailure: v.perFailure, perDay: v.perDay }
 }
 
 export type Config = 'intercept' | 'rounds' | 'roundsPending'

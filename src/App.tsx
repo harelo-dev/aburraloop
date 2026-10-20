@@ -4,6 +4,7 @@ import { DataPanel, type Applied } from './DataPanel'
 import { Tendency } from './Tendency'
 import { Guided } from './Guided'
 import { ScenarioSummary } from './ScenarioSummary'
+import { Levers } from './Levers'
 import type { Report } from './data/ingest'
 import { MapView } from './MapView'
 import { ASSUMPTIONS, defaultParams, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
@@ -222,6 +223,8 @@ export function App() {
       {report?.rates && dataInfo && <Tendency rates={report.rates} days={dataInfo.days} />}
 
       <Analysis params={p} />
+
+      <Levers params={p} report={report} />
 
       <ScenarioSummary params={p} origin={dataInfo ? 'archivo propio' : origin === 'guided' ? 'estimaciones del modo guiado' : 'valores de la demo'} report={report} />
 

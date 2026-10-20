@@ -251,3 +251,30 @@ describe('delivered and failed rows', () => {
     expect(r.data.exposure).toBeUndefined()
   })
 })
+
+describe('a column called "ubicación"', () => {
+  const read = (csv: string) => {
+    const p = Papa.parse<Row>(csv, { header: true, skipEmptyLines: 'greedy' })
+    const m = detectMapping(p.meta.fields!, p.data)
+    return { m, rows: prepareRows(p.data, m, {}, 'A') }
+  }
+  it('is read as coordinates when the values are coordinates', () => {
+    const { m, rows } = read('Ubicación,Municipio\n"6.2442, -75.5812",Medellín\n"6.19, -75.60",Envigado')
+    expect(m.coords).toBe('Ubicación')
+    expect(m.address).toBeUndefined()
+    expect(rows.map((r) => r.locator.kind)).toEqual(['point', 'point'])
+  })
+  it('is read as an address when the values are addresses', () => {
+    const { m, rows } = read('Ubicación,Municipio\nCalle 50 # 50-10,Envigado\nCra 70 # 44-20,Medellín')
+    expect(m.address).toBe('Ubicación')
+    expect(m.coords).toBeUndefined()
+    expect(rows.map((r) => r.locator.kind)).toEqual(['address', 'address'])
+  })
+  it('without values to look at, leaves the column for the person to assign', () => {
+    expect(detectMapping(['Ubicación', 'Municipio']).address).toBeUndefined()
+  })
+  it('a mixed file locates each row by what it has', () => {
+    const { rows } = read('latitud,longitud,direccion,municipio,valor\n6.2442,-75.5812,,Medellín,100\n,,Calle 50 # 50-10,Envigado,100\n,,,Bello,100\n,,,,100')
+    expect(rows.map((r) => r.locator.kind)).toEqual(['point', 'address', 'municipality', 'none'])
+  })
+})

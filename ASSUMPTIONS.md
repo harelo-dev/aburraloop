@@ -144,6 +144,15 @@ Límites que conviene tener presentes:
 - **Horas faltantes** se completan al azar entre las 8:00 y las 16:30, y la hora decide si un reintento funciona, así que sin hora la calibración es débil.
 - **Sesgo de selección.** El archivo solo trae los fallos que se registraron. Si los fallos más difíciles no se registran, el éxito del reintento sale sobrestimado.
 
+### Cómo se decide dónde está cada fila
+
+1. Si la fila trae **coordenadas** válidas (en dos columnas o en una), se usan tal cual. Un par invertido (longitud en la columna de latitud) se corrige.
+2. Si no, y trae **dirección escrita**, se busca en Nominatim, pero **solo si diste permiso**. Sin permiso no sale ninguna dirección del navegador.
+3. Si no se encontró, o no hubo permiso, y la fila trae **municipio**, se ubica en el centro del municipio y se reparte alrededor con la misma dispersión de los datos sintéticos.
+4. Si no hay nada de eso, la fila queda fuera y se cuenta.
+
+Una columna con un nombre ambiguo, como «Ubicación», se clasifica mirando los valores: si al menos 60% de las primeras 50 filas son coordenadas, se trata como coordenadas; si no, como direcciones. Una dirección que en realidad trae coordenadas dentro se reconoce y no se busca.
+
 ### Tasa de novedad por zona, hora y día
 
 Solo existe si el archivo dice qué filas fueron entregadas y cuáles fallidas.
@@ -156,6 +165,26 @@ Solo existe si el archivo dice qué filas fueron entregadas y cuáles fallidas.
 - **Filas sin estado reconocible** (ni entregado ni fallido) se excluyen y se cuentan.
 
 **Ubicar las vans por tendencia.** Ordena las celdas por entregas × tasa ajustada, reparte entre ellas los fallos esperados de un día y aplica el mismo criterio de ubicación que con el historial. Cuando hay muchos días de datos coincide casi del todo con ubicar por el historial de fallos, porque el conteo ya refleja la tasa. Aporta más con pocos días, donde el conteo crudo es ruidoso. Su principal uso está en otra parte: saber en qué zonas y horas intervenir para reducir novedades.
+
+## Palancas para reducir novedades
+
+**Qué vale evitar una novedad.** Por cada fallo: flete de ida y vuelta al CEDI, manejo y la parte del margen que se pierde si vuelve, promediado por grado (A, B o C) sobre 8 días simulados. La comparación parte de una operación **sin van**: si ya hay una, parte de esas novedades ya se rescata y evitarlas vale menos.
+
+**Efecto necesario.** Para cada palanca: costo al día entre lo que ahorraría si evitara todas las novedades que ataca. Es la fracción de esas novedades que tiene que evitar para cubrir su costo. Por encima de 100% no se paga nunca. Se clasifica en pequeño (menos de 10%), mediano (menos de 30%), grande y «no se paga ni evitando todos».
+
+| Palanca | Ataca | Costo al día |
+| --- | --- | --- |
+| Confirmar antes de salir | Fallos A | costo por paquete × despachos |
+| Entregar en otra franja | Fallos desde las 14:00 | costo por paquete movido × paquetes de esas horas |
+| Reintento el mismo día | Fallos A | minutos de moto por reintento × costo del minuto × fallos A |
+| Recoger en la van o en un punto | Fallos A | el costo de una van al día |
+| Pago anticipado | Fallos B | costo por paquete ofrecido × despachos |
+
+Los costos por defecto ($200, $150, 15 minutos y $100) **son ejemplos**, no cotizaciones.
+
+**Tamaño de un piloto.** Para dos grupos, la fórmula de dos proporciones con 5% de significancia y 80% de potencia, comparando la tasa de fallos que ataca la palanca con esa misma tasa reducida por el efecto. Los días salen de repartir los paquetes expuestos en dos grupos. Para las palancas que actúan después del fallo (reintento, recoger en la van) lo que se mide es cuántos clientes aceptan: con unos 96 fallos ofrecidos se estima ese porcentaje con ±10 puntos. Un piloto de más de 60 días se marca como demasiado largo.
+
+**Lo que no sabe.** Los efectos de varias palancas se solapan y no se suman sin más. Un piloto solo mide el efecto si el reparto entre grupos es al azar.
 
 ## Análisis de la interfaz
 

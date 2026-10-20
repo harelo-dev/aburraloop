@@ -34,6 +34,12 @@ Para quien no tiene un archivo a mano: cinco preguntas (bodega, volumen y motos,
 
 Las cifras son las que escribes, no medidas, y el resultado lo dice.
 
+## Palancas para reducir novedades
+
+Una tarjeta compara cinco palancas: confirmar antes de salir, entregar en otra franja horaria, reintentar el mismo día si el cliente quiere, recoger en la van o en un punto, y pago anticipado con enlace de pago. **No supone cuánto reduce cada una las novedades**, porque nadie lo sabe hasta probarla. Para cada una calcula cuánto tendría que reducir las novedades que ataca para pagarse, y tú juzgas si ese efecto es plausible. Los costos son ejemplos que se cambian.
+
+Si escribes el efecto que esperas, calcula cuánto ganarías al día y cuántas entregas y días necesitaría un piloto de dos grupos para medirlo. Un efecto muy pequeño no se puede medir con un piloto razonable, y la tarjeta lo dice.
+
 ## Resumen del escenario
 
 Al final de la página hay un resumen de lo que dice el escenario actual, en rangos y no en cifras exactas, que puedes copiar o descargar como `.json`. **No se envía a ningún lado.** Nunca incluye las filas de tu archivo, direcciones, coordenadas, nombres ni teléfonos. Está para que veas qué contiene un escenario y lo compartas tú si quieres.
@@ -62,6 +68,8 @@ Solo la ubicación es obligatoria. Todo lo demás mejora la calibración y, si f
 | ¿Entregado o fallido? | Si el archivo trae **todas** las entregas y no solo los fallos, mide la tasa de novedad por municipio, por zona del mapa, por hora y por día de la semana, y calcula cuántos paquetes se despachan al día |
 
 Acepta `,` `;` tabulador o `|` como separador, decimales con punto o con coma, valores como `$ 120.000`, fechas día primero (`10/03/2026`) o ISO, horas de 24 horas o con AM/PM, y archivos UTF-8 o Windows-1252 (el «CSV» de Excel en español). Un archivo de fallos no dice cuántos paquetes se despacharon, así que ese número se pide para calcular la tasa de novedad.
+
+**Cómo se ubica cada fila.** Antes de procesar, el panel muestra cuántas filas se ubicarán por coordenadas, cuántas por dirección escrita (que necesitan tu permiso) y cuántas solo por municipio. Una columna llamada «Ubicación» se lee según lo que trae: coordenadas o direcciones. En un archivo mixto, cada fila se ubica con lo que tenga.
 
 **Direcciones escritas.** Se pueden ubicar con [Nominatim](https://nominatim.org/) de OpenStreetMap, un servicio público que se usa a una consulta por segundo y solo si lo aceptas, porque las direcciones salen de tu navegador. Entiende calles y barrios, pero casi nunca el número de puerta, así que la ubicación es aproximada y el panel muestra cuántas filas quedaron por número, por calle, por barrio o solo por municipio. Lo ya buscado se recuerda en tu navegador, con un botón para borrarlo. Si tu archivo ya trae coordenadas, o puedes ubicarlas con otra herramienta, el resultado será más preciso.
 
