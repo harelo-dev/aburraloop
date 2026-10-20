@@ -28,6 +28,28 @@ La van puede operar de dos formas: **interceptar** los fallos en la calle, o **r
 
 Los parámetros de entrada son el CEDI base, el volumen diario (150–1.200), la flota (5–45 motos), la tasa de novedad (5–30%) y de 0 a 3 mini-vans. Además se ajustan el tiempo máximo de viaje de la van, la distancia mínima de la van al CEDI, el éxito del segundo intento, qué parte del margen se pierde si un paquete vuelve al CEDI y el costo del desvío de la moto.
 
+## Usar tus propios datos
+
+El panel «Usa tus propios datos» carga un CSV con tus paquetes fallidos y calibra el simulador con ellos. **El archivo se procesa en tu navegador y no se sube a ningún servidor.** Quita nombres y teléfonos antes de cargar: el simulador no los necesita.
+
+Solo la ubicación es obligatoria. Todo lo demás mejora la calibración y, si falta, se completa con los supuestos de la demo y el panel te lo avisa.
+
+| Columna | Para qué sirve |
+| --- | --- |
+| Latitud y longitud, o coordenadas en una sola columna, o dirección escrita | Dónde falló el paquete. Con coordenadas se usan tal cual; una dirección solo se busca cuando la fila no trae coordenadas |
+| Municipio o ciudad | Mejora la búsqueda de direcciones y sirve de respaldo cuando una dirección no se encuentra |
+| Fecha y hora (juntas o separadas) | Cuántos días cubre el archivo, y a qué hora ocurrió cada fallo. La hora decide cuánto sirve un reintento |
+| Valor del pedido (COD) | El valor que se rescata |
+| Motivo de la novedad | Se clasifica en A (reintento viable), B (liquidación flash) o C (vuelve al CEDI). La clasificación se sugiere y se puede corregir |
+| ¿Se entregó en el reintento? | Calibra el éxito del segundo intento, para A y para B |
+| Mensajero o moto | Cuenta cuántas motos tienes |
+
+Acepta `,` `;` tabulador o `|` como separador, decimales con punto o con coma, valores como `$ 120.000`, fechas día primero (`10/03/2026`) o ISO, horas de 24 horas o con AM/PM, y archivos UTF-8 o Windows-1252 (el «CSV» de Excel en español). Un archivo de fallos no dice cuántos paquetes se despacharon, así que ese número se pide para calcular la tasa de novedad.
+
+**Direcciones escritas.** Se pueden ubicar con [Nominatim](https://nominatim.org/) de OpenStreetMap, un servicio público que se usa a una consulta por segundo y solo si lo aceptas, porque las direcciones salen de tu navegador. Entiende calles y barrios, pero casi nunca el número de puerta, así que la ubicación es aproximada y el panel muestra cuántas filas quedaron por número, por calle, por barrio o solo por municipio. Lo ya buscado se recuerda en tu navegador, con un botón para borrarlo. Si tu archivo ya trae coordenadas, o puedes ubicarlas con otra herramienta, el resultado será más preciso.
+
+Hay un archivo de ejemplo en el mismo panel, para probarlo sin datos propios.
+
 ## Cómo funciona
 
 - Los incidentes se generan con una semilla fija, así que la misma configuración da el mismo resultado.

@@ -23,6 +23,27 @@ export type Objective = 'reach' | 'value' | 'density'
  */
 export type Mode = 'intercept' | 'rounds'
 
+/** One failed delivery from the operation's own file, already located on the grid. */
+export interface PoolIncident {
+  lat: number
+  lon: number
+  cell: number
+  /** Spread (km) when the location is only known to the municipality; 0 when it is a point. */
+  sigmaKm: number
+  hour: number | null
+  cod: number | null
+  grade: Grade
+  municipality: string
+}
+
+/** The operation's own failures. The simulator draws its days from this pool instead of the synthetic generator. */
+export interface RealData {
+  id: string
+  incidents: PoolIncident[]
+  /** Share of failures per municipality, in the order of places.json. */
+  municipalityWeights: number[]
+}
+
 export interface Params {
   cedi: CediId
   volume: number
@@ -31,6 +52,7 @@ export interface Params {
   vans: 0 | 1 | 2 | 3
   maxMinutes: number // max road time van -> package
   secondAttemptSuccess: number // Grade A, 0..1
+  gradeBSuccess: number // Grade B (flash liquidation), 0..1
   /** A van must sit at least this many road minutes from the CEDI: next to it, it intercepts nothing the CEDI would not receive anyway. */
   minCediMinutes: number
   /** Share of the product margin that is really lost when a failed package goes back to the CEDI (it can be offered again). */
@@ -42,12 +64,13 @@ export interface Params {
   mode: Mode
   /** Rounds mode: the van visits only couriers that have a failure waiting, instead of every courier every round. */
   skipEmptyVisits: boolean
+  /** When set, failures are drawn from the operation's own data. */
+  data?: RealData
   seed: number
 }
 
 export interface Assumptions {
   gradeShare: { A: number; B: number; C: number }
-  gradeBSuccess: number
   marginA: number
   marginB: number
   freightCopPerKm: number
@@ -68,7 +91,6 @@ export interface Assumptions {
 
 export const ASSUMPTIONS: Assumptions = {
   gradeShare: { A: 0.45, B: 0.25, C: 0.3 },
-  gradeBSuccess: 0.8,
   marginA: 0.28,
   marginB: 0.12,
   freightCopPerKm: 900,
@@ -176,6 +198,14 @@ export function nearestCell(lat: number, lon: number): number {
   return best
 }
 
+/** The grid cell for a point, or null if the point is farther than maxKm from every cell (outside the valley). */
+export function locateCell(lat: number, lon: number, maxKm = 3): number | null {
+  const i = nearestCell(lat, lon)
+  const dy = (CELLS[i].lat - lat) * 111.2
+  const dx = (CELLS[i].lon - lon) * 111.2 * Math.cos((lat * Math.PI) / 180)
+  return Math.hypot(dx, dy) <= maxKm ? i : null
+}
+
 export function nearestMunicipality(lat: number, lon: number) {
   const k = Math.cos((lat * Math.PI) / 180)
   let best = places.municipalities[0]
@@ -193,6 +223,25 @@ export function generateIncidents(p: Params, a: Assumptions, seed: number): Inci
   const totalWeight = places.municipalities.reduce((s, m) => s + m.weight, 0)
   const cediIdx = travel.origins.indexOf(`cedi:${p.cedi}`)
   const out: Incident[] = []
+  const pool = p.data?.incidents
+  if (pool && pool.length) {
+    for (let i = 0; i < failed; i++) {
+      const src = pool[Math.floor(r() * pool.length)]
+      let cell = src.cell
+      if (src.sigmaKm > 0) {
+        const dLat = (gauss(r) * src.sigmaKm) / 111.2
+        const dLon = (gauss(r) * src.sigmaKm) / (111.2 * Math.cos((src.lat * Math.PI) / 180))
+        cell = nearestCell(src.lat + dLat, src.lon + dLon)
+      }
+      const hour = src.hour ?? a.hours[0] + r() * (a.hours[1] - a.hours[0])
+      const cod = src.cod ?? a.codRange[0] + r() * (a.codRange[1] - a.codRange[0])
+      out.push({
+        lat: CELLS[cell].lat, lon: CELLS[cell].lon, cell, hour, cod, grade: src.grade, municipality: src.municipality,
+        saved: false, vanIndex: null, cediKm: CELLS[cell].km[cediIdx], vanMinutes: null, roll: r(),
+      })
+    }
+    return out
+  }
   for (let i = 0; i < failed; i++) {
     let u = r() * totalWeight
     const m = places.municipalities.find((mm) => (u -= mm.weight) < 0) ?? places.municipalities[0]
@@ -219,7 +268,7 @@ export function attemptFactor(hour: number, a: Assumptions) {
 /** Expected pesos recovered if this failure is intercepted: the odds the second attempt works times what it recovers. */
 function expectedValue(q: Incident, p: Params, a: Assumptions) {
   if (q.grade === 'C') return 0
-  const success = q.grade === 'A' ? p.secondAttemptSuccess : a.gradeBSuccess
+  const success = q.grade === 'A' ? p.secondAttemptSuccess : p.gradeBSuccess
   const margin = (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
   return success * attemptFactor(q.hour, a) * (2 * q.cediKm * a.freightCopPerKm + a.handlingCop + q.cod * margin)
 }
@@ -368,7 +417,7 @@ const trainingCache = new Map<string, Demand>()
 
 /** Demand per cell averaged over previous simulated days (the operation's "history"). */
 function trainingDemand(p: Params, a: Assumptions): Demand {
-  const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, p.marginLossShare, a])
+  const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, p.data?.id, a])
   const hit = trainingCache.get(key)
   if (hit) return hit
   const avg: Demand = { ev: new Array<number>(N).fill(0), count: new Array<number>(N).fill(0), all: new Array<number>(N).fill(0) }
@@ -404,7 +453,7 @@ export function vanCells(p: Params, a: Assumptions, incidents: Incident[]): numb
         ? densityPlacement(p.vans, d.count, p.maxMinutes, allowed, initial)
         : greedyPlacement(p.vans, d.ev, p.maxMinutes, allowed, initial)
   if (p.placement === 'hindsight') return choose(demandFrom(incidents, p, a))
-  const key = (tag: string) => JSON.stringify([tag, p.mode, p.objective, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, a])
+  const key = (tag: string) => JSON.stringify([tag, p.mode, p.objective, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.gradeBSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, p.data?.id, a])
   if (p.placement === 'zones') {
     const anchors = ZONE_ANCHORS[p.vans]
       .map((id) => places.vanAnchors.find((v) => v.id === id)!)
@@ -447,7 +496,7 @@ export function simulateAt(p: Params, a: Assumptions, incidents: Incident[], cel
     vans[pick].handled++
     q.vanIndex = pick
     detourCost += 2 * pickMin * p.detourCopPerMin
-    const success = (q.grade === 'A' ? p.secondAttemptSuccess : a.gradeBSuccess) * attemptFactor(q.hour + pickMin / 60, a)
+    const success = (q.grade === 'A' ? p.secondAttemptSuccess : p.gradeBSuccess) * attemptFactor(q.hour + pickMin / 60, a)
     if (q.roll < success) {
       q.saved = true
       const margin = (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
@@ -472,15 +521,16 @@ export function simulateAt(p: Params, a: Assumptions, incidents: Incident[], cel
 }
 
 const COURIER_SEED = 424242
-const courierCache = new Map<number, { municipality: string; cell: number }[]>()
+const courierCache = new Map<string, { municipality: string; cell: number }[]>()
 
 /** The same couriers every day: spread over the municipalities by share of shipments (largest remainder), each with a home cell. */
-function couriersFor(fleet: number) {
-  const hit = courierCache.get(fleet)
+function couriersFor(fleet: number, weights: number[]) {
+  const key = `${fleet}|${weights.join(',')}`
+  const hit = courierCache.get(key)
   if (hit) return hit
   const r = mulberry32(COURIER_SEED)
-  const total = places.municipalities.reduce((sum, m) => sum + m.weight, 0)
-  const quota = places.municipalities.map((m) => (fleet * m.weight) / total)
+  const total = weights.reduce((sum, w) => sum + w, 0)
+  const quota = weights.map((w) => (fleet * w) / total)
   const counts = quota.map(Math.floor)
   let left = fleet - counts.reduce((x, y) => x + y, 0)
   quota.map((q, i) => ({ i, f: q - Math.floor(q) })).sort((x, y) => y.f - x.f).forEach(({ i }) => { if (left-- > 0) counts[i]++ })
@@ -492,7 +542,7 @@ function couriersFor(fleet: number) {
       out.push({ municipality: m.name, cell: nearestCell(m.lat + dLat, m.lon + dLon) })
     }
   })
-  courierCache.set(fleet, out)
+  courierCache.set(key, out)
   return out
 }
 
@@ -508,7 +558,7 @@ function simulateRounds(p: Params, a: Assumptions, incidents: Incident[], cells:
     name: `V${i + 1}`, lat: CELLS[cell].lat, lon: CELLS[cell].lon, cell,
     municipality: nearestMunicipality(CELLS[cell].lat, CELLS[cell].lon), handled: 0,
   }))
-  const couriers = couriersFor(p.fleet)
+  const couriers = couriersFor(p.fleet, p.data ? p.data.municipalityWeights : places.municipalities.map((m) => m.weight))
   const cediIdx = travel.origins.indexOf(`cedi:${p.cedi}`)
 
   const group = couriers.map((c) => {
@@ -572,7 +622,7 @@ function simulateRounds(p: Params, a: Assumptions, incidents: Incident[], cells:
     if (handoff === null || k < 0) { atClosing++; continue }
     if (q.grade === 'C' || vans[k].handled >= a.vanCapacity) continue
     vans[k].handled++
-    const success = (q.grade === 'A' ? p.secondAttemptSuccess : a.gradeBSuccess) * attemptFactor(handoff, a)
+    const success = (q.grade === 'A' ? p.secondAttemptSuccess : p.gradeBSuccess) * attemptFactor(handoff, a)
     if (q.roll < success) {
       q.saved = true
       const margin = (q.grade === 'A' ? a.marginA : a.marginB) * p.marginLossShare
@@ -604,5 +654,5 @@ function simulateRounds(p: Params, a: Assumptions, incidents: Incident[], cells:
 
 export const defaultParams: Params = {
   cedi: 'centro', volume: 600, fleet: 24, failureRate: 0.15, vans: 2, maxMinutes: 25,
-  secondAttemptSuccess: 0.6, minCediMinutes: 10, marginLossShare: 0.5, detourCopPerMin: 300, placement: 'history', objective: 'value', mode: 'intercept', skipEmptyVisits: false, seed: 7,
+  secondAttemptSuccess: 0.6, gradeBSuccess: 0.8, minCediMinutes: 10, marginLossShare: 0.5, detourCopPerMin: 300, placement: 'history', objective: 'value', mode: 'intercept', skipEmptyVisits: false, seed: 7,
 }

@@ -116,6 +116,21 @@ Si el tiempo de las motos es caro, cada desvío a la van destruye valor y recorr
 
 Son resultados de un modelo sintético. Con una distribución real de fallos pueden cambiar.
 
+## Cuando cargas tus datos
+
+El simulador deja de generar fallos sintéticos y los **saca de tu archivo**: cada día simulado toma al azar, con reemplazo, tantos fallos como `despachos × tasa de novedad`, y cada uno conserva su ubicación, su hora, su valor y su grado. Así los controles de volumen y de tasa siguen funcionando. Los fallos que solo se pudieron ubicar por municipio se reparten alrededor de su centro, con la misma dispersión que los sintéticos, y las motos del modo de recorridos se reparten por municipio según tus fallos.
+
+De tu archivo salen estos parámetros, que se aplican a los controles y se pueden corregir a mano: la tasa de novedad (fallos por día entre los despachos que indiques), el éxito del segundo intento en Grado A y en Grado B (solo si hay al menos 15 casos con resultado), y el número de motos (solo si hay columna de mensajero). **Todo lo demás sigue siendo supuesto**: costos, capacidad de la van, margen, costo del desvío y tiempos de viaje.
+
+Límites que conviene tener presentes:
+
+- **Muestra pequeña.** Con pocos días o pocos fallos, las vans se ubican sobre la misma muestra que luego se simula, y el resultado se ve mejor de lo que sería. El panel avisa si hay menos de 100 fallos o menos de 10 días. Un archivo más largo reduce este efecto.
+- **Los días no se repiten tal cual.** Se muestrea de todos los fallos, así que no se conserva el orden ni la agrupación por día. Un día excepcionalmente malo se diluye.
+- **Ubicación aproximada.** Una dirección ubicada por calle puede quedar a más de un kilómetro de la real, y la malla es de ~1 km. Más de 30% de filas solo por municipio dispara un aviso.
+- **Fallos fuera del valle** (más de 3 km de la celda más cercana) se excluyen y se cuentan.
+- **Horas faltantes** se completan al azar entre las 8:00 y las 16:30, y la hora decide si un reintento funciona, así que sin hora la calibración es débil.
+- **Sesgo de selección.** El archivo solo trae los fallos que se registraron. Si los fallos más difíciles no se registran, el éxito del reintento sale sobrestimado.
+
 ## Análisis de la interfaz
 
 Las cuatro tarjetas de análisis promedian **8 días simulados** (semillas consecutivas) con los parámetros actuales. Si eliges 0 vans, usan 2.

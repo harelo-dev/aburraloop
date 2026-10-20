@@ -125,7 +125,8 @@ export function sensitivity(p: Params): { base: number; rows: Sensitivity[] } {
   const shareA = (v: number) => withA({ gradeShare: { A: v, B: A.gradeShare.B, C: 1 - v - A.gradeShare.B } })
   cases.push({ label: 'Proporción de paquetes Grado A', low: ['35%', p, shareA(0.35)], high: ['55%', p, shareA(0.55)] })
 
-  cases.push({ label: 'Éxito Grado B (liquidación flash)', low: ['65%', p, withA({ gradeBSuccess: 0.65 })], high: ['95%', p, withA({ gradeBSuccess: 0.95 })] })
+  const blo = clamp(p.gradeBSuccess - 0.15, 0.1, 0.95), bhi = clamp(p.gradeBSuccess + 0.15, 0.1, 0.95)
+  cases.push({ label: 'Éxito Grado B (liquidación flash)', low: [pct(blo), { ...p, gradeBSuccess: blo }, A], high: [pct(bhi), { ...p, gradeBSuccess: bhi }, A] })
   cases.push({ label: 'Margen del producto (Grado A)', low: ['20%', p, withA({ marginA: 0.2 })], high: ['36%', p, withA({ marginA: 0.36 })] })
   cases.push({ label: 'Costo de una van por día', low: [cop(A.vanCostCopPerDay * 0.75), p, withA({ vanCostCopPerDay: A.vanCostCopPerDay * 0.75 })], high: [cop(A.vanCostCopPerDay * 1.25), p, withA({ vanCostCopPerDay: A.vanCostCopPerDay * 1.25 })] })
   cases.push({ label: 'Costo del flete por km', low: [`$${A.freightCopPerKm * 2 / 3}`, p, withA({ freightCopPerKm: A.freightCopPerKm * 2 / 3 })], high: [`$${A.freightCopPerKm * 4 / 3}`, p, withA({ freightCopPerKm: A.freightCopPerKm * 4 / 3 })] })

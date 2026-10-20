@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Analysis, OBJECTIVE_LABEL } from './Analysis'
+import { DataPanel, type Applied } from './DataPanel'
 import { MapView } from './MapView'
 import { ASSUMPTIONS, defaultParams, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
 import { cop, dec } from './format'
@@ -22,6 +23,15 @@ function Slider(props: { id: string; label: string; value: number; min: number; 
 
 export function App() {
   const [p, setP] = useState<Params>(defaultParams)
+  const [dataInfo, setDataInfo] = useState<{ used: number; days: number } | null>(null)
+  const useData = (a: Applied, summary: { used: number; days: number }) => {
+    setP((o) => ({ ...o, data: a.data, ...a.patch }))
+    setDataInfo(summary)
+  }
+  const clearData = () => {
+    setP((o) => ({ ...o, data: undefined }))
+    setDataInfo(null)
+  }
   const set = <K extends keyof Params>(k: K, v: Params[K]) => setP((o) => ({ ...o, [k]: v }))
   const r = useMemo(() => simulate(p), [p])
   const net = r.net
@@ -39,8 +49,10 @@ export function App() {
           <h1>Aburrá<span>Loop</span></h1>
           <p className="tag">Cuánto cuesta devolver al CEDI lo que no se entregó, y cuánto se rescata si una mini-van lo intercepta en la calle el mismo día.</p>
         </div>
-        <span className="demo">DEMO · datos sintéticos · tiempos de viaje por carretera</span>
+        <span className="demo">{dataInfo ? `TUS DATOS · ${dataInfo.used} fallos · tiempos de viaje por carretera` : 'DEMO · datos sintéticos · tiempos de viaje por carretera'}</span>
       </header>
+
+      <DataPanel active={dataInfo} volume={p.volume} onApply={useData} onClear={clearData} />
 
       <div className="grid">
         <aside className="panel" aria-label="Parámetros">
@@ -52,8 +64,8 @@ export function App() {
             </select>
           </div>
           <Slider id="vol" label="Despachos al día" value={p.volume} min={150} max={1200} step={50} out={String(p.volume)} onChange={(v) => set('volume', v)} />
-          <Slider id="fleet" label="Motorizados en calle" value={p.fleet} min={5} max={45} step={1} out={String(p.fleet)} onChange={(v) => set('fleet', v)} />
-          <Slider id="rate" label="Tasa de novedad / fallo COD" value={Math.round(p.failureRate * 100)} min={5} max={30} step={1} out={`${Math.round(p.failureRate * 100)}%`} onChange={(v) => set('failureRate', v / 100)} />
+          <Slider id="fleet" label="Motorizados en calle" value={p.fleet} min={3} max={80} step={1} out={String(p.fleet)} onChange={(v) => set('fleet', v)} />
+          <Slider id="rate" label="Tasa de novedad / fallo COD" value={Math.round(p.failureRate * 100)} min={2} max={40} step={1} out={`${Math.round(p.failureRate * 100)}%`} onChange={(v) => set('failureRate', v / 100)} />
           <div className="ctl">
             <span className="lbl">Mini-vans pivote</span>
             <div className="seg" role="group" aria-label="Mini-vans">
@@ -99,7 +111,8 @@ export function App() {
           <p className="hint tight">Un paquete devuelto puede reofrecerse. Solo cuenta la parte de la venta que se pierde.</p>
           <Slider id="detour" label="Costo del desvío de la moto" value={p.detourCopPerMin} min={0} max={1500} step={50} out={`$${p.detourCopPerMin}/min`} onChange={(v) => set('detourCopPerMin', v)} />
           <p className="hint tight">Lo que cuesta cada minuto que una moto se desvía hacia la van, ida y vuelta. Más caro, más conviene tener la van cerca de la concentración.</p>
-          <Slider id="p2" label="Éxito del 2.º intento (Grado A)" value={Math.round(p.secondAttemptSuccess * 100)} min={30} max={90} step={5} out={`${Math.round(p.secondAttemptSuccess * 100)}%`} onChange={(v) => set('secondAttemptSuccess', v / 100)} />
+          <Slider id="pB" label="Éxito de la liquidación flash (Grado B)" value={Math.round(p.gradeBSuccess * 100)} min={10} max={95} step={5} out={`${Math.round(p.gradeBSuccess * 100)}%`} onChange={(v) => set('gradeBSuccess', v / 100)} />
+          <Slider id="p2" label="Éxito del 2.º intento (Grado A)" value={Math.round(p.secondAttemptSuccess * 100)} min={10} max={95} step={5} out={`${Math.round(p.secondAttemptSuccess * 100)}%`} onChange={(v) => set('secondAttemptSuccess', v / 100)} />
           <button className="reroll" onClick={() => set('seed', (p.seed * 31 + 11) % 100000)}>Simular otro día</button>
         </aside>
 
@@ -141,7 +154,7 @@ export function App() {
             <h2>Supuestos del modelo</h2>
             <div className="assume">
               <div>Mezcla de fallos: <b>45% A · 25% B · 30% C</b></div>
-              <div>Éxito Grado B (flash): <b>{Math.round(ASSUMPTIONS.gradeBSuccess * 100)}%</b></div>
+              <div>Éxito Grado B (flash): <b>{Math.round(p.gradeBSuccess * 100)}%</b></div>
               <div>Margen A / B: <b>28% / 12% del COD</b>, de lo cual se pierde <b>{Math.round(p.marginLossShare * 100)}%</b> al volver</div>
               <div>Desvío de la moto: <b>${p.detourCopPerMin}/min</b>, ida y vuelta a la van</div>
               <div>Flete ahorrado: <b>${ASSUMPTIONS.freightCopPerKm}/km ida y vuelta + ${ASSUMPTIONS.handlingCop / 1000}k manejo</b></div>
@@ -160,7 +173,9 @@ export function App() {
       <Analysis params={p} />
 
       <footer>
-        Simulación con datos sintéticos, no una predicción para una operación concreta. Con datos reales de novedades, el mismo modelo da una estimación propia.
+        {dataInfo
+          ? 'Simulación con los fallos de tu archivo, ubicados en una malla de ~1 km. Los demás supuestos (costos, capacidad, margen) siguen siendo los de la demo. Es una estimación, no una predicción.'
+          : 'Simulación con datos sintéticos, no una predicción para una operación concreta. Con datos reales de novedades, el mismo modelo da una estimación propia.'}
         {' '}<a href="https://github.com/harelo-dev/aburraloop">Código en GitHub</a> · MIT
       </footer>
     </div>
