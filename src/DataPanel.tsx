@@ -31,11 +31,11 @@ function decode(buffer: ArrayBuffer): string {
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
 export function DataPanel({ active, volume, open, onToggle, onApply, onClear }: {
-  active: { used: number; days: number } | null
+  active: { used: number; days: number; example?: boolean } | null
   volume: number
   open: boolean
   onToggle: (open: boolean) => void
-  onApply: (a: Applied, summary: { used: number; days: number }) => void
+  onApply: (a: Applied, summary: { used: number; days: number; example?: boolean }) => void
   onClear: () => void
 }) {
   const [fileName, setFileName] = useState('')
@@ -138,7 +138,7 @@ export function DataPanel({ active, volume, open, onToggle, onApply, onClear }: 
     if (suggestion.secondAttemptSuccess !== null) patch.secondAttemptSuccess = clamp(suggestion.secondAttemptSuccess, 0.1, 0.95)
     if (suggestion.gradeBSuccess !== null) patch.gradeBSuccess = clamp(suggestion.gradeBSuccess, 0.1, 0.95)
     if (suggestion.fleet !== null) patch.fleet = clamp(suggestion.fleet, 3, 80)
-    onApply({ data: result.data, patch, report: result.report }, { used: result.report.used, days: result.report.days })
+    onApply({ data: result.data, patch, report: result.report }, { used: result.report.used, days: result.report.days, example: fileName.startsWith('ejemplo-') })
   }
 
   const clearCache = () => { browserCache().clear(); setCached(0) }
@@ -153,7 +153,7 @@ export function DataPanel({ active, volume, open, onToggle, onApply, onClear }: 
     <>
     {active && (
       <div className="data-active" role="status">
-        <span><b>Usando tus datos:</b> {active.used} fallos en {active.days} día{active.days === 1 ? '' : 's'}.</span>
+        <span><b>{active.example ? 'Usando un archivo de ejemplo con datos inventados:' : 'Usando tus datos:'}</b> {active.used} fallos en {active.days} día{active.days === 1 ? '' : 's'}.</span>
         <button className="btn ghost danger" onClick={onClear}>Volver a datos sintéticos</button>
       </div>
     )}

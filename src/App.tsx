@@ -28,7 +28,7 @@ function Slider(props: { id: string; label: string; value: number; min: number; 
 
 export function App() {
   const [p, setP] = useState<Params>(defaultParams)
-  const [dataInfo, setDataInfo] = useState<{ used: number; days: number } | null>(null)
+  const [dataInfo, setDataInfo] = useState<{ used: number; days: number; example?: boolean } | null>(null)
   const [report, setReport] = useState<Report | null>(null)
   const [showRates, setShowRates] = useState(false)
   const [guidedOpen, setGuidedOpen] = useState(true)
@@ -44,7 +44,7 @@ export function App() {
       return { ...o, gradeShare: { A, B, C: Math.max(0, 1 - A - B) } }
     })
   }
-  const useData = (a: Applied, summary: { used: number; days: number }) => {
+  const useData = (a: Applied, summary: { used: number; days: number; example?: boolean }) => {
     setP((o) => ({ ...o, data: a.data, ...a.patch, placement: o.placement === 'trend' && !a.data.exposure ? 'history' : o.placement }))
     setDataInfo(summary)
     setReport(a.report)
@@ -85,7 +85,7 @@ export function App() {
           <h1>Aburrá<span>Loop</span></h1>
           <p className="tag">Cuánto cuesta devolver al CEDI lo que no se entregó, y cuánto se rescata si una mini-van lo intercepta en la calle el mismo día.</p>
         </div>
-        <span className="demo">{dataInfo ? `TUS DATOS · ${dataInfo.used} fallos · tiempos de viaje por carretera` : 'DEMO · datos sintéticos · tiempos de viaje por carretera'}</span>
+        <span className="demo">{dataInfo ? `${dataInfo.example ? 'EJEMPLO · datos inventados' : 'TUS DATOS'} · ${dataInfo.used} fallos · tiempos de viaje por carretera` : 'DEMO · datos sintéticos · tiempos de viaje por carretera'}</span>
       </header>
 
       {!dataInfo && <Guided open={guidedOpen} onToggle={setGuidedOpen} onApply={useGuided} onCsv={csvFromGuided} />}
@@ -240,7 +240,9 @@ export function App() {
 
       <footer>
         {dataInfo
-          ? 'Simulación con los fallos de tu archivo, ubicados en una malla de ~1 km. Los demás supuestos (costos, capacidad, margen) siguen siendo los de la demo. Es una estimación, no una predicción.'
+          ? (dataInfo.example
+            ? 'Simulación con un archivo de ejemplo cuyos datos están inventados. Las diferencias entre zonas y horas que se ven son parte del ejemplo, no un hallazgo sobre el valle. Los demás supuestos (costos, capacidad, margen) son los de la demo. Es una estimación, no una predicción.'
+            : 'Simulación con los fallos de tu archivo, ubicados en una malla de ~1 km. Los demás supuestos (costos, capacidad, margen) siguen siendo los de la demo. Es una estimación, no una predicción.')
           : 'Simulación con datos sintéticos, no una predicción para una operación concreta. Con datos reales de novedades, el mismo modelo da una estimación propia.'}
         {' '}<a href="https://github.com/harelo-dev/aburraloop">Código en GitHub</a> · MIT
       </footer>
