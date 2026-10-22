@@ -214,3 +214,4 @@ label.check.consent { background: var(--bg); border: 1px solid var(--line); bord
 
 /* Touch targets on small screens */
 @media (max-width: 520px) { .seg button, .reroll { min-height: 44px; } }
+.map.placeholder { display: grid; place-items: center; background: var(--bg); color: var(--muted); font-size: 14px; }
