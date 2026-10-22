@@ -205,6 +205,7 @@ export function App() {
           ? 'Simulación con tus datos de novedades. La ubicación de las celdas, los tiempos de viaje y los costos de las vans siguen siendo supuestos del modelo; no es una predicción.'
           : 'Simulación con datos sintéticos, no una predicción para una operación concreta. Con datos reales de novedades, el mismo modelo da una estimación propia.'}
         {' '}<a href="https://github.com/harelo-dev/aburraloop">Código en GitHub</a> · MIT
+        <br /><b>Privacidad:</b> los archivos que cargas se procesan solo en tu navegador. No se suben, no se guardan y no salen de tu equipo; al cerrar o recargar la página desaparecen.
       </footer>
     </div>
   )
