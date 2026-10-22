@@ -153,3 +153,4 @@ a.hint { padding: 8px 0; }
   .seg button { min-height: 44px; }
   .reroll, .go { min-height: 44px; }
 }
+.map.placeholder { display: grid; place-items: center; background: var(--bg); color: var(--muted); font-size: 14px; }

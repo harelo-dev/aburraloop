@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react'
+import { Suspense, lazy, useMemo, useState } from 'react'
 import { Analysis, OBJECTIVE_LABEL } from './Analysis'
-import { MapView } from './MapView'
 import { ASSUMPTIONS, defaultParams, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
 import { Upload, type Loaded } from './Upload'
 import { cop, dec, int } from './format'
 import travel from './data/travel.json'
+
+// The map library is the heaviest part of the app, so it loads after the controls and numbers are already on screen.
+const MapView = lazy(() => import('./MapView').then((m) => ({ default: m.MapView })))
 
 const CEDIS = [
   { id: 'sur', name: 'CEDI Sur · Sabaneta' },
@@ -151,7 +153,9 @@ export function App() {
           </div>
 
           <div className="panel mapbox">
-            <MapView result={r} params={p} />
+            <Suspense fallback={<div className="map placeholder" role="status">Cargando mapa…</div>}>
+              <MapView result={r} params={p} />
+            </Suspense>
             <div className="legend">
               <span><i style={{ background: 'var(--accent)' }} />Salvado en calle</span>
               <span><i style={{ background: 'var(--loss)' }} />Retorno forzoso al CEDI</span>
