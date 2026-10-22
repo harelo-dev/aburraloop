@@ -69,7 +69,7 @@ export function MapView({ result, params, rateCells, overall, showRates }: { res
   }
 
   useEffect(() => {
-    const m = new maplibregl.Map({ container: el.current!, style: STYLE, center: [-75.55, 6.25], zoom: 10.2, attributionControl: { compact: true } })
+    const m = new maplibregl.Map({ container: el.current!, style: STYLE, center: [-75.55, 6.25], zoom: 10.2, attributionControl: { compact: true }, cooperativeGestures: window.matchMedia('(pointer: coarse)').matches })
     map.current = m
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     m.on('load', () => {

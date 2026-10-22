@@ -211,3 +211,6 @@ label.check.consent { background: var(--bg); border: 1px solid var(--line); bord
 .lever-cost input { font: inherit; width: 84px; padding: 5px 8px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; font-family: var(--mono); }
 .lever-cost input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .lever-expect { display: grid; gap: 4px; }
+
+/* Touch targets on small screens */
+@media (max-width: 520px) { .seg button, .reroll { min-height: 44px; } }
