@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react'
-import maplibregl, { type GeoJSONSource } from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
+import type { GeoJSONSource } from 'maplibre-gl'
+// MapLibre 6 ships its worker as a separate ES module; Vite bundles it (with its shared chunk) and we point the library at it.
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
+
+maplibregl.setWorkerUrl(workerUrl)
 import places from './data/places.json'
 import travel from './data/travel.json'
 import { minutesBetween, type Params, type Result } from './sim/simulate'
