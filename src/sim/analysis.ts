@@ -13,11 +13,13 @@ export interface Mean {
   savedPct: number
 }
 
-/** Average over `days` simulated days (seeds seed, seed+1, ...). */
+/** Average over `days` simulated days (seeds seed, seed+1, ...), or over uploaded days spread evenly across the file. */
 export function meanOver(p: Params, days = ANALYSIS_DAYS, a: Assumptions = ASSUMPTIONS): Mean {
   let failed = 0, saved = 0, recovered = 0, vanCost = 0, detourCost = 0, tripSaving = 0, net = 0
+  const n = p.data ? p.data.days.length : 0
+  if (p.data) days = Math.min(days, n)
   for (let d = 0; d < days; d++) {
-    const r = simulate({ ...p, seed: p.seed + d }, a)
+    const r = simulate({ ...p, seed: p.data ? Math.floor((d * n) / days) : p.seed + d }, a)
     failed += r.failed; saved += r.saved; recovered += r.recovered; vanCost += r.vanCost; detourCost += r.detourCost; tripSaving += r.tripSaving; net += r.net
   }
   failed /= days; saved /= days; recovered /= days; vanCost /= days; detourCost /= days; tripSaving /= days; net /= days
@@ -33,7 +35,9 @@ export const VOLUME_POINTS = Array.from({ length: 22 }, (_, i) => 150 + i * 50)
 export interface VolumePoint { volume: number; failed: number; net: number[] }
 
 /** Net per day against daily dispatches (150 to 1200), one series per van count (1 to 3). */
-export function volumeCurve(p: Params): VolumePoint[] {
+export function volumeCurve(base: Params): VolumePoint[] {
+  // Volume is what is being swept, so uploaded days (which have a fixed volume) give way to synthetic ones.
+  const p = { ...base, data: undefined }
   return VOLUME_POINTS.map((volume) => ({
     volume,
     failed: volume * p.failureRate,
@@ -116,8 +120,11 @@ export function sensitivity(p: Params): { base: number; rows: Sensitivity[] } {
   const p2lo = clamp(p.secondAttemptSuccess - 0.2, 0.1, 0.95), p2hi = clamp(p.secondAttemptSuccess + 0.2, 0.1, 0.95)
   cases.push({ label: 'Éxito del 2.º intento (Grado A)', low: [pct(p2lo), { ...p, secondAttemptSuccess: p2lo }, A], high: [pct(p2hi), { ...p, secondAttemptSuccess: p2hi }, A] })
 
-  const rlo = clamp(p.failureRate - 0.05, 0.02, 0.4), rhi = clamp(p.failureRate + 0.05, 0.02, 0.4)
-  cases.push({ label: 'Tasa de novedad', low: [pct(rlo), { ...p, failureRate: rlo }, A], high: [pct(rhi), { ...p, failureRate: rhi }, A] })
+  // The failure rate of an uploaded file is what the file says, so it is not a free assumption there.
+  if (!p.data) {
+    const rlo = clamp(p.failureRate - 0.05, 0.02, 0.4), rhi = clamp(p.failureRate + 0.05, 0.02, 0.4)
+    cases.push({ label: 'Tasa de novedad', low: [pct(rlo), { ...p, failureRate: rlo }, A], high: [pct(rhi), { ...p, failureRate: rhi }, A] })
+  }
 
   const mlo = Math.max(5, p.maxMinutes - 10), mhi = p.maxMinutes + 10
   cases.push({ label: 'Tiempo máx. van → paquete', low: [`${mlo} min`, { ...p, maxMinutes: mlo }, A], high: [`${mhi} min`, { ...p, maxMinutes: mhi }, A] })

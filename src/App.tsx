@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { Analysis, OBJECTIVE_LABEL } from './Analysis'
 import { MapView } from './MapView'
 import { ASSUMPTIONS, defaultParams, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
-import { cop, dec } from './format'
+import { Upload, type Loaded } from './Upload'
+import { cop, dec, int } from './format'
 import travel from './data/travel.json'
 
 const CEDIS = [
@@ -21,8 +22,19 @@ function Slider(props: { id: string; label: string; value: number; min: number; 
 }
 
 export function App() {
-  const [p, setP] = useState<Params>(defaultParams)
+  const [base, setP] = useState<Params>(defaultParams)
+  const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const [uploading, setUploading] = useState(false)
   const set = <K extends keyof Params>(k: K, v: Params[K]) => setP((o) => ({ ...o, [k]: v }))
+  // With uploaded data the volume and failure rate are what the file says, and the seed picks the day.
+  const p = useMemo<Params>(() => {
+    if (!loaded) return base
+    const days = loaded.dataset.days
+    const volume = days.reduce((s, d) => s + d.volume, 0)
+    const failed = days.reduce((s, d) => s + d.failures.length, 0)
+    return { ...base, data: loaded.dataset, volume: Math.round(volume / days.length), failureRate: volume ? failed / volume : 0, seed: base.seed % days.length }
+  }, [base, loaded])
+  const day = loaded ? loaded.dataset.days[p.seed] : null
   const r = useMemo(() => simulate(p), [p])
   const net = r.net
   const pct = r.failed ? (r.saved / r.failed) * 100 : 0
@@ -39,21 +51,47 @@ export function App() {
           <h1>Aburrá<span>Loop</span></h1>
           <p className="tag">Cuánto cuesta devolver al CEDI lo que no se entregó, y cuánto se rescata si una mini-van lo intercepta en la calle el mismo día.</p>
         </div>
-        <span className="demo">DEMO · datos sintéticos · tiempos de viaje por carretera</span>
+        <span className="demo">{loaded ? 'TUS DATOS · tiempos de viaje por carretera' : 'DEMO · datos sintéticos · tiempos de viaje por carretera'}</span>
       </header>
 
       <div className="grid">
         <aside className="panel" aria-label="Parámetros">
-          <h2>Tu operación</h2>
+          <h2>Tus datos</h2>
+          {loaded ? (
+            <div className="ctl data-on">
+              <p className="hint"><b>{loaded.name}</b><br />{int(loaded.dataset.days.reduce((s, d) => s + d.failures.length, 0))} fallidos · {loaded.dataset.days.length} {loaded.dataset.days.length === 1 ? 'día' : 'días'}</p>
+              {loaded.dataset.days.length > 1 && (
+                <>
+                  <label htmlFor="day">Día que se muestra</label>
+                  <select id="day" value={p.seed} onChange={(e) => set('seed', +e.target.value)}>
+                    {loaded.dataset.days.map((d, i) => <option key={i} value={i}>{d.label} · {d.failures.length} de {d.volume}</option>)}
+                  </select>
+                </>
+              )}
+              <button className="reroll" onClick={() => setUploading(true)}>Cambiar archivo</button>
+              <button className="link" onClick={() => setLoaded(null)}>Volver a los datos sintéticos</button>
+            </div>
+          ) : (
+            <div className="ctl">
+              <button className="reroll" onClick={() => setUploading(true)}>Cargar mis datos (CSV o XLSX)</button>
+              <p className="hint">Con tus despachos y novedades el mismo modelo estima tu caso. Se procesa en tu navegador.</p>
+              <a className="hint" href={`${import.meta.env.BASE_URL}ejemplo-novedades.csv`} download>Descargar un archivo de ejemplo</a>
+            </div>
+          )}
+          <h2 className="sep">Tu operación</h2>
           <div className="ctl">
             <label htmlFor="cedi">CEDI base</label>
             <select id="cedi" value={p.cedi} onChange={(e) => set('cedi', e.target.value as Params['cedi'])}>
               {CEDIS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
-          <Slider id="vol" label="Despachos al día" value={p.volume} min={150} max={1200} step={50} out={String(p.volume)} onChange={(v) => set('volume', v)} />
+          {loaded
+            ? <div className="ctl"><span className="lbl">Despachos y novedad<output>{int(p.volume)} · {(p.failureRate * 100).toFixed(1).replace('.', ',')}%</output></span><p className="hint">Promedio diario de tu archivo.</p></div>
+            : <>
+              <Slider id="vol" label="Despachos al día" value={p.volume} min={150} max={1200} step={50} out={String(p.volume)} onChange={(v) => set('volume', v)} />
+              <Slider id="rate" label="Tasa de novedad / fallo COD" value={Math.round(p.failureRate * 100)} min={5} max={30} step={1} out={`${Math.round(p.failureRate * 100)}%`} onChange={(v) => set('failureRate', v / 100)} />
+            </>}
           <Slider id="fleet" label="Motorizados en calle" value={p.fleet} min={5} max={45} step={1} out={String(p.fleet)} onChange={(v) => set('fleet', v)} />
-          <Slider id="rate" label="Tasa de novedad / fallo COD" value={Math.round(p.failureRate * 100)} min={5} max={30} step={1} out={`${Math.round(p.failureRate * 100)}%`} onChange={(v) => set('failureRate', v / 100)} />
           <div className="ctl">
             <span className="lbl">Mini-vans pivote</span>
             <div className="seg" role="group" aria-label="Mini-vans">
@@ -100,10 +138,11 @@ export function App() {
           <Slider id="detour" label="Costo del desvío de la moto" value={p.detourCopPerMin} min={0} max={1500} step={50} out={`$${p.detourCopPerMin}/min`} onChange={(v) => set('detourCopPerMin', v)} />
           <p className="hint tight">Lo que cuesta cada minuto que una moto se desvía hacia la van, ida y vuelta. Más caro, más conviene tener la van cerca de la concentración.</p>
           <Slider id="p2" label="Éxito del 2.º intento (Grado A)" value={Math.round(p.secondAttemptSuccess * 100)} min={30} max={90} step={5} out={`${Math.round(p.secondAttemptSuccess * 100)}%`} onChange={(v) => set('secondAttemptSuccess', v / 100)} />
-          <button className="reroll" onClick={() => set('seed', (p.seed * 31 + 11) % 100000)}>Simular otro día</button>
+          {!loaded && <button className="reroll" onClick={() => set('seed', (p.seed * 31 + 11) % 100000)}>Simular otro día</button>}
         </aside>
 
         <section className="main">
+          {day && <p className="databar">Mostrando <b>{day.label}</b>: {day.failures.length} fallidos de {int(day.volume)} despachos de <b>{loaded!.name}</b>.{loaded!.filled.length > 0 && <> Sin {loaded!.filled.join(', ')} en el archivo; se usan los supuestos.</>}</p>}
           <div className="kpis" aria-live="polite">
             <div className="kpi"><div className="k">Retorno físico evitado</div><div className="v good">{pct.toFixed(0)}%</div><div className="s">{r.saved} de {r.failed} fallidos</div></div>
             <div className="kpi"><div className="k">Capital recuperado / día</div><div className={`v ${net >= 0 ? 'good' : 'bad'}`}>{cop(r.recovered)}</div><div className="s">{p.vans ? `${p.mode === 'rounds' ? `neto, con ahorro de cierre ${cop(r.tripSaving)}` : 'neto de vans y desvíos'}: ${net < 0 ? '−' : ''}${cop(Math.abs(net))}` : 'sin vans no hay rescate'}</div></div>
@@ -140,7 +179,7 @@ export function App() {
           <div className="panel">
             <h2>Supuestos del modelo</h2>
             <div className="assume">
-              <div>Mezcla de fallos: <b>45% A · 25% B · 30% C</b></div>
+              <div>Mezcla de fallos: <b>{loaded && !loaded.filled.includes('el grado A/B/C') ? 'la de tu archivo' : '45% A · 25% B · 30% C'}</b></div>
               <div>Éxito Grado B (flash): <b>{Math.round(ASSUMPTIONS.gradeBSuccess * 100)}%</b></div>
               <div>Margen A / B: <b>28% / 12% del COD</b>, de lo cual se pierde <b>{Math.round(p.marginLossShare * 100)}%</b> al volver</div>
               <div>Desvío de la moto: <b>${p.detourCopPerMin}/min</b>, ida y vuelta a la van</div>
@@ -159,8 +198,12 @@ export function App() {
 
       <Analysis params={p} />
 
+      {uploading && <Upload onLoad={(l) => { setLoaded(l); setP((o) => ({ ...o, seed: 0 })) }} onClose={() => setUploading(false)} />}
+
       <footer>
-        Simulación con datos sintéticos, no una predicción para una operación concreta. Con datos reales de novedades, el mismo modelo da una estimación propia.
+        {loaded
+          ? 'Simulación con tus datos de novedades. La ubicación de las celdas, los tiempos de viaje y los costos de las vans siguen siendo supuestos del modelo; no es una predicción.'
+          : 'Simulación con datos sintéticos, no una predicción para una operación concreta. Con datos reales de novedades, el mismo modelo da una estimación propia.'}
         {' '}<a href="https://github.com/harelo-dev/aburraloop">Código en GitHub</a> · MIT
       </footer>
     </div>

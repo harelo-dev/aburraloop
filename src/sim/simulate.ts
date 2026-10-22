@@ -43,6 +43,32 @@ export interface Params {
   /** Rounds mode: the van visits only couriers that have a failure waiting, instead of every courier every round. */
   skipEmptyVisits: boolean
   seed: number
+  /** Uploaded operation. When present the failures come from it and `seed` picks the day (modulo the number of days). */
+  data?: Dataset
+}
+
+/** A failed package from an uploaded file. Fields the file did not carry are null and get a seeded default. */
+export interface DataFailure {
+  lat: number
+  lon: number
+  cell: number
+  municipality: string
+  hour: number | null
+  cod: number | null
+  grade: Grade | null
+}
+
+export interface DataDay {
+  label: string
+  /** Packages dispatched that day, delivered or not. */
+  volume: number
+  failures: DataFailure[]
+}
+
+export interface Dataset {
+  /** Distinguishes datasets in the caches. */
+  id: string
+  days: DataDay[]
 }
 
 export interface Assumptions {
@@ -187,7 +213,24 @@ export function nearestMunicipality(lat: number, lon: number) {
   return best.name
 }
 
+/** The failures of one uploaded day. Missing hour, value or grade are drawn from a generator seeded by day and row. */
+function incidentsFromData(p: Params, a: Assumptions, data: Dataset, day: number): Incident[] {
+  const cediIdx = travel.origins.indexOf(`cedi:${p.cedi}`)
+  return data.days[day].failures.map((f, i) => {
+    const r = mulberry32(day * 100003 + i + 1)
+    const hour0 = r(), cod0 = r(), grade0 = r(), roll = r()
+    const hour = f.hour ?? a.hours[0] + hour0 * (a.hours[1] - a.hours[0])
+    const cod = f.cod ?? a.codRange[0] + cod0 * (a.codRange[1] - a.codRange[0])
+    const grade: Grade = f.grade ?? (grade0 < a.gradeShare.A ? 'A' : grade0 < a.gradeShare.A + a.gradeShare.B ? 'B' : 'C')
+    return {
+      lat: CELLS[f.cell].lat, lon: CELLS[f.cell].lon, cell: f.cell, hour, cod, grade, municipality: f.municipality,
+      saved: false, vanIndex: null, cediKm: CELLS[f.cell].km[cediIdx], vanMinutes: null, roll,
+    }
+  })
+}
+
 export function generateIncidents(p: Params, a: Assumptions, seed: number): Incident[] {
+  if (p.data) return incidentsFromData(p, a, p.data, Math.abs(Math.trunc(seed)) % p.data.days.length)
   const r = mulberry32(seed)
   const failed = Math.round(p.volume * p.failureRate)
   const totalWeight = places.municipalities.reduce((s, m) => s + m.weight, 0)
@@ -368,13 +411,15 @@ const trainingCache = new Map<string, Demand>()
 
 /** Demand per cell averaged over previous simulated days (the operation's "history"). */
 function trainingDemand(p: Params, a: Assumptions): Demand {
-  const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, p.marginLossShare, a])
+  const key = JSON.stringify([p.cedi, p.volume, p.failureRate, p.secondAttemptSuccess, p.marginLossShare, p.data?.id, a])
   const hit = trainingCache.get(key)
   if (hit) return hit
   const avg: Demand = { ev: new Array<number>(N).fill(0), count: new Array<number>(N).fill(0), all: new Array<number>(N).fill(0) }
-  for (let day = 0; day < TRAINING_DAYS; day++) {
-    const d = demandFrom(generateIncidents(p, a, TRAINING_SEED + day), p, a)
-    for (let j = 0; j < N; j++) { avg.ev[j] += d.ev[j] / TRAINING_DAYS; avg.count[j] += d.count[j] / TRAINING_DAYS; avg.all[j] += d.all[j] / TRAINING_DAYS }
+  // With uploaded data the history is every uploaded day; with a single day it equals that day.
+  const days = p.data ? p.data.days.length : TRAINING_DAYS
+  for (let day = 0; day < days; day++) {
+    const d = demandFrom(generateIncidents(p, a, p.data ? day : TRAINING_SEED + day), p, a)
+    for (let j = 0; j < N; j++) { avg.ev[j] += d.ev[j] / days; avg.count[j] += d.count[j] / days; avg.all[j] += d.all[j] / days }
   }
   if (trainingCache.size > 400) trainingCache.clear()
   trainingCache.set(key, avg)
@@ -404,7 +449,7 @@ export function vanCells(p: Params, a: Assumptions, incidents: Incident[]): numb
         ? densityPlacement(p.vans, d.count, p.maxMinutes, allowed, initial)
         : greedyPlacement(p.vans, d.ev, p.maxMinutes, allowed, initial)
   if (p.placement === 'hindsight') return choose(demandFrom(incidents, p, a))
-  const key = (tag: string) => JSON.stringify([tag, p.mode, p.objective, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.secondAttemptSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, a])
+  const key = (tag: string) => JSON.stringify([tag, p.mode, p.objective, p.cedi, p.minCediMinutes, p.vans, p.volume, p.failureRate, p.data?.id, p.secondAttemptSuccess, p.marginLossShare, p.detourCopPerMin, p.maxMinutes, a])
   if (p.placement === 'zones') {
     const anchors = ZONE_ANCHORS[p.vans]
       .map((id) => places.vanAnchors.find((v) => v.id === id)!)

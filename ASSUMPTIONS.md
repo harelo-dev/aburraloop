@@ -148,6 +148,17 @@ Limitaciones: es tiempo de carro sin tráfico por hora del día, y las motos sue
 - Los grados A, B y C son una proporción fija, no una clasificación de paquetes reales.
 - Los costos son estimaciones redondas, no cotizaciones.
 
+## Cargar datos propios
+
+La app acepta un CSV o XLSX con un envío por fila y no depende de cómo se llamen las columnas: detecta las más probables (por el nombre y por el contenido, por ejemplo coordenadas dentro del Valle) y el usuario las corrige en una pantalla de mapeo. El archivo se procesa en el navegador y no sale de él.
+
+- **Obligatorio:** una ubicación (latitud y longitud, o municipio) y, para calcular la tasa de novedad, el resultado de cada envío. Sin columna de resultado se asume que todas las filas son fallidas y se pide el volumen diario.
+- **Opcional:** valor a cobrar, hora, fecha y grado A/B/C. Lo que falte se sustituye por los supuestos del modelo, con una semilla fija por día y fila para que el resultado sea reproducible.
+- **Municipio sin coordenadas:** el paquete cae alrededor del centro del municipio, con la misma dispersión de los días sintéticos. No se geocodifican direcciones.
+- **Se descartan** las filas fuera del Valle de Aburrá o sin ubicación, y el resumen dice cuántas y por qué.
+- **Días:** si hay fecha, cada día es una jornada; el análisis promedia hasta 8 días repartidos por el archivo. «Según fallos de días previos» usa todos los días cargados, así que con un solo día ve el mismo día que simula y da un resultado optimista.
+- **Lo que sigue siendo supuesto:** tiempos de viaje, costos, márgenes, éxito del segundo intento, capacidad de la van y la grilla de ~1 km. En la curva del punto de equilibrio el volumen es lo que varía, así que usa días sintéticos con la tasa de novedad del archivo.
+
 ## Cómo calibrarlo con datos reales
 
-Con 30 días de intentos fallidos de una operación (hora, dirección, motivo, valor y desenlace del reintento) se reemplazan la mezcla de grados, la tasa de éxito del segundo intento y la distribución espacial. La estructura del código ya separa esos supuestos del motor.
+La distribución espacial, la hora y el valor ya pueden venir de un archivo (ver arriba). Para calibrar lo demás hacen falta, además, el desenlace de los reintentos y el motivo de cada fallo, con los que se reemplazarían la mezcla de grados y la tasa de éxito del segundo intento. La estructura del código ya separa esos supuestos del motor.

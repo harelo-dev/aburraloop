@@ -28,6 +28,10 @@ La van puede operar de dos formas: **interceptar** los fallos en la calle, o **r
 
 Los parámetros de entrada son el CEDI base, el volumen diario (150–1.200), la flota (5–45 motos), la tasa de novedad (5–30%) y de 0 a 3 mini-vans. Además se ajustan el tiempo máximo de viaje de la van, la distancia mínima de la van al CEDI, el éxito del segundo intento, qué parte del margen se pierde si un paquete vuelve al CEDI y el costo del desvío de la moto.
 
+## Con tus datos
+
+El botón **Cargar mis datos** acepta un CSV o XLSX con un envío por fila. No importa cómo se llamen las columnas: la app propone cuál es cuál y tú lo corriges. Necesita una ubicación (latitud y longitud, o municipio) y el resultado de cada envío; el valor a cobrar, la hora, la fecha y el grado A/B/C son opcionales. El archivo se procesa en tu navegador y no se sube a ningún servidor. Hay un [archivo de ejemplo](public/ejemplo-novedades.csv) con encabezados poco habituales. Detalles y límites en [ASSUMPTIONS.md](ASSUMPTIONS.md#cargar-datos-propios).
+
 ## Cómo funciona
 
 - Los incidentes se generan con una semilla fija, así que la misma configuración da el mismo resultado.
@@ -52,7 +56,7 @@ Requiere Node 20 o superior.
 
 ## Stack
 
-Vite, React, TypeScript, MapLibre GL, Vitest.
+Vite, React, TypeScript, MapLibre GL, read-excel-file, Vitest.
 
 ## Licencia
 

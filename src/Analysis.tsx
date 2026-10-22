@@ -86,7 +86,7 @@ export function Analysis({ params }: { params: Params }) {
     <section className="analysis" aria-label="Análisis" data-stale={stale}>
       <div className="an-head">
         <h2>Análisis</h2>
-        <p className="hint">Promedio de {ANALYSIS_DAYS} días simulados con tus parámetros actuales{deferred.vans === 0 ? ' (con 2 vans, porque elegiste 0)' : ''}. Las cifras son netas del costo de las vans y de los desvíos de las motos.</p>
+        <p className="hint">{deferred.data ? <>Promedio de {Math.min(ANALYSIS_DAYS, deferred.data.days.length)} {Math.min(ANALYSIS_DAYS, deferred.data.days.length) === 1 ? 'día' : 'días'} de tus datos</> : <>Promedio de {ANALYSIS_DAYS} días simulados</>} con tus parámetros actuales{deferred.vans === 0 ? ' (con 2 vans, porque elegiste 0)' : ''}. Las cifras son netas del costo de las vans y de los desvíos de las motos.</p>
       </div>
 
       <div className="an-grid">
@@ -132,7 +132,8 @@ export function Analysis({ params }: { params: Params }) {
 
         <div className="panel">
           <h3>Punto de equilibrio</h3>
-          <VolumeChart points={volume} current={deferred.volume} />
+          <VolumeChart points={volume} current={Math.min(1200, Math.max(150, deferred.volume))} />
+          {deferred.data && <p className="hint">Aquí el volumen es lo que varía, así que la curva usa días sintéticos con la tasa de novedad de tus datos.</p>}
           <ul className="take list">
             {[0, 1, 2].map((s) => (
               <li key={s}><i style={{ background: SERIES_COLORS[s] }} />{s + 1} van{s ? 's' : ''}: {be[s] === null ? <>no se pagan con 150 a 1.200 despachos al día</> : <>se pagan desde <b>{fmtV(be[s])}</b> despachos al día</>}</li>
