@@ -30,6 +30,11 @@ function VolumeChart({ points, current }: { points: VolumePoint[]; current: numb
   const y = (v: number) => T + (1 - (v - yMin) / (yMax - yMin)) * (H - T - B)
   const ticks: number[] = []
   for (let v = yMin; v <= yMax + 1; v += step) ticks.push(v)
+  // End labels sit at the last point of each line; where the lines converge they are pushed apart so none overlaps.
+  const lastNet = points[points.length - 1].net
+  const labelY = [0, 1, 2].map((s) => y(lastNet[s]))
+  const order = [0, 1, 2].sort((a, b) => labelY[a] - labelY[b])
+  for (let i = 1; i < order.length; i++) labelY[order[i]] = Math.max(labelY[order[i]], labelY[order[i - 1]] + 13)
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="Neto por día según despachos diarios, para 1, 2 y 3 vans">
       {ticks.map((t) => (
@@ -48,7 +53,7 @@ function VolumeChart({ points, current }: { points: VolumePoint[]; current: numb
         return (
           <g key={s}>
             <path d={d} fill="none" stroke={SERIES_COLORS[s]} strokeWidth="2.2" strokeLinejoin="round" />
-            <text x={x(last.volume) + 6} y={y(last.net[s]) + 4} fill={SERIES_COLORS[s]} className="end-label">{s + 1} van{s ? 's' : ''}</text>
+            <text x={x(last.volume) + 6} y={labelY[s] + 4} fill={SERIES_COLORS[s]} className="end-label">{s + 1} van{s ? 's' : ''}</text>
           </g>
         )
       })}

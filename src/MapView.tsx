@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react'
-import maplibregl, { type GeoJSONSource } from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
+import type { GeoJSONSource } from 'maplibre-gl'
+// MapLibre 6 ships its worker as a separate ES module; Vite bundles it (with its shared chunk) and we point the library at it.
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
+
+maplibregl.setWorkerUrl(workerUrl)
 import places from './data/places.json'
 import travel from './data/travel.json'
 import { minutesBetween, type Params, type Result } from './sim/simulate'
@@ -64,7 +69,7 @@ export function MapView({ result, params, rateCells, overall, showRates }: { res
   }
 
   useEffect(() => {
-    const m = new maplibregl.Map({ container: el.current!, style: STYLE, center: [-75.55, 6.25], zoom: 10.2, attributionControl: { compact: true } })
+    const m = new maplibregl.Map({ container: el.current!, style: STYLE, center: [-75.55, 6.25], zoom: 10.2, attributionControl: { compact: true }, cooperativeGestures: window.matchMedia('(pointer: coarse)').matches })
     map.current = m
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     m.on('load', () => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Suspense, lazy, useMemo, useState } from 'react'
 import { Analysis, OBJECTIVE_LABEL } from './Analysis'
 import { DataPanel, type Applied } from './DataPanel'
 import { Tendency } from './Tendency'
@@ -6,10 +6,12 @@ import { Guided } from './Guided'
 import { ScenarioSummary } from './ScenarioSummary'
 import { Levers } from './Levers'
 import type { Report } from './data/ingest'
-import { MapView } from './MapView'
 import { ASSUMPTIONS, defaultParams, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
 import { cop, dec } from './format'
 import travel from './data/travel.json'
+
+// The map library is the heaviest part of the app, so it loads after the controls and numbers are already on screen.
+const MapView = lazy(() => import('./MapView').then((m) => ({ default: m.MapView })))
 
 const CEDIS = [
   { id: 'sur', name: 'CEDI Sur · Sabaneta' },
@@ -174,7 +176,9 @@ export function App() {
                 <button aria-pressed={showRates} onClick={() => setShowRates(true)}>Tasa de novedad por zona</button>
               </div>
             )}
-            <MapView result={r} params={p} rateCells={report?.rates?.cells} overall={report?.rates?.overall} showRates={showRates} />
+            <Suspense fallback={<div className="map placeholder" role="status">Cargando mapa…</div>}>
+              <MapView result={r} params={p} rateCells={report?.rates?.cells} overall={report?.rates?.overall} showRates={showRates} />
+            </Suspense>
             <div className="legend">
               <span><i style={{ background: 'var(--accent)' }} />Salvado en calle</span>
               <span><i style={{ background: 'var(--loss)' }} />Retorno forzoso al CEDI</span>
