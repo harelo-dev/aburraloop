@@ -6,7 +6,7 @@ import { Guided } from './Guided'
 import { ScenarioSummary } from './ScenarioSummary'
 import { Levers } from './Levers'
 import type { Report } from './data/ingest'
-import { MapView } from './MapView'
+import { DayReplay } from './Replay'
 import { ASSUMPTIONS, defaultParams, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
 import { cop, dec } from './format'
 import travel from './data/travel.json'
@@ -174,13 +174,16 @@ export function App() {
                 <button aria-pressed={showRates} onClick={() => setShowRates(true)}>Tasa de novedad por zona</button>
               </div>
             )}
-            <MapView result={r} params={p} rateCells={report?.rates?.cells} overall={report?.rates?.overall} showRates={showRates} />
+            <DayReplay result={r} params={p} rateCells={report?.rates?.cells} overall={report?.rates?.overall} showRates={showRates} />
             <div className="legend">
               <span><i style={{ background: 'var(--accent)' }} />Salvado en calle</span>
               <span><i style={{ background: 'var(--loss)' }} />Retorno forzoso al CEDI</span>
               {p.mode === 'rounds'
                 ? <span><i className="ring" />Moto (centro de su zona)</span>
-                : <span><i className="line" style={{ background: 'var(--loss)', opacity: 0.5 }} />Viaje de peso muerto (línea recta, ilustrativa)</span>}
+                : <>
+                    <span><i className="line" style={{ background: 'var(--accent)' }} />Arco a la van (ilustrativo)</span>
+                    <span><i className="line" style={{ background: 'var(--loss)', opacity: 0.6 }} />Arco al CEDI: viaje de peso muerto (ilustrativo)</span>
+                  </>}
               <span><i className="sq" />Zona que alcanzan las vans</span>
               <span><i className="sq gray" />Sin vans: demasiado cerca del CEDI</span>
               {showRates && <span><i className="grad" />Tasa de novedad: menor → mayor que la general (zonas con 5+ entregas)</span>}
