@@ -1,11 +1,16 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import maplibregl, { type GeoJSONSource } from 'maplibre-gl'
 import places from './data/places.json'
 import travel from './data/travel.json'
 import type { DayLayer } from './DayLayer'
 import { buildArcs } from './replay'
-import { minutesBetween, type Params, type Result } from './sim/simulate'
+import { minutesBetween, type Params, type PlaceError, type Result } from './sim/simulate'
 
+const NOTICE: Record<PlaceError, string> = {
+  outside: 'Fuera del valle: la van no puede ir ahí.',
+  'near-cedi': 'Demasiado cerca del CEDI: no hay vans en la zona gris.',
+  taken: 'Ya hay una van en esa celda.',
+}
 const STYLE = 'https://tiles.openfreemap.org/styles/positron'
 
 const point = (lon: number, lat: number, props: Record<string, unknown> = {}) => ({
@@ -26,7 +31,7 @@ function build(result: Result, params: Params) {
     blocked: { type: 'FeatureCollection' as const, features: blocked },
     reach: { type: 'FeatureCollection' as const, features: reach },
     incidents: { type: 'FeatureCollection' as const, features: result.incidents.map((q) => point(q.lon, q.lat, { saved: q.saved, hour: q.hour })) },
-    vans: { type: 'FeatureCollection' as const, features: result.vans.map((v) => point(v.lon, v.lat, { label: v.name })) },
+    vans: { type: 'FeatureCollection' as const, features: result.vans.map((v, i) => point(v.lon, v.lat, { label: v.name, idx: i })) },
     couriers: { type: 'FeatureCollection' as const, features: result.couriers.map((c) => point(c.lon, c.lat)) },
     cedi: { type: 'FeatureCollection' as const, features: [point(cedi.lon, cedi.lat, { label: cedi.name })] },
   }
@@ -34,14 +39,16 @@ function build(result: Result, params: Params) {
 
 export interface RateCell { lat: number; lon: number; deliveries: number; rate: number }
 
-export function MapView({ result, params, rateCells, overall, showRates, hour }: { result: Result; params: Params; rateCells?: RateCell[]; overall?: number; showRates?: boolean; hour: number }) {
+export function MapView({ result, params, rateCells, overall, showRates, hour, onMoveVan }: { result: Result; params: Params; rateCells?: RateCell[]; overall?: number; showRates?: boolean; hour: number; onMoveVan?: (index: number, lat: number, lon: number) => PlaceError | null }) {
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const ready = useRef(false)
   const day = useRef<DayLayer | null>(null)
   const shown = useRef<number>(NaN)
-  const latest = useRef({ result, params, rateCells, overall, showRates, hour })
-  latest.current = { result, params, rateCells, overall, showRates, hour }
+  const latest = useRef({ result, params, rateCells, overall, showRates, hour, onMoveVan })
+  const [notice, setNotice] = useState<string | null>(null)
+  const stopDrag = useRef<() => void>(() => {})
+  latest.current = { result, params, rateCells, overall, showRates, hour, onMoveVan }
 
   const push = () => {
     const m = map.current
@@ -114,14 +121,56 @@ export function MapView({ result, params, rateCells, overall, showRates, hour }:
         m.addLayer(day.current, 'cedi')
         push()
       })
+      // Drag a van: it follows the pointer cell by cell, and the result is recalculated at each step.
+      let dragging: number | null = null
+      const canvas = m.getCanvas()
+      const start = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
+        const f = (e as { features?: { properties: { idx: number } }[] }).features?.[0]
+        if (!f || !latest.current.onMoveVan) return
+        e.preventDefault()
+        dragging = f.properties.idx
+        m.dragPan.disable()
+        canvas.style.cursor = 'grabbing'
+        setNotice(null)
+      }
+      const move = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
+        if (dragging === null) return
+        const err = latest.current.onMoveVan?.(dragging, e.lngLat.lat, e.lngLat.lng)
+        setNotice(err ? NOTICE[err] : null)
+      }
+      const end = () => {
+        if (dragging === null) return
+        dragging = null
+        m.dragPan.enable()
+        canvas.style.cursor = ''
+        setNotice(null)
+      }
+      m.on('mousedown', 'vans', start)
+      m.on('touchstart', 'vans', start)
+      m.on('mousemove', move)
+      m.on('touchmove', move)
+      m.on('mouseup', end)
+      m.on('touchend', end)
+      m.on('touchcancel', end)
+      // Letting go outside the map must still end the drag.
+      window.addEventListener('mouseup', end)
+      window.addEventListener('touchend', end)
+      stopDrag.current = () => { window.removeEventListener('mouseup', end); window.removeEventListener('touchend', end) }
+      m.on('mouseenter', 'vans', () => { if (dragging === null && latest.current.onMoveVan) canvas.style.cursor = 'grab' })
+      m.on('mouseleave', 'vans', () => { if (dragging === null) canvas.style.cursor = '' })
       ready.current = true
       push()
     })
-    return () => { ready.current = false; day.current = null; m.remove() }
+    return () => { ready.current = false; day.current = null; stopDrag.current(); m.remove() }
   }, [])
 
   useEffect(push, [result, params, rateCells, overall, showRates])
   useEffect(pushHour, [hour])
 
-  return <div ref={el} className="map" role="img" aria-label="Mapa del Valle de Aburrá con paquetes fallidos, salvados y retornados" />
+  return (
+    <div className="map-wrap">
+      <div ref={el} className="map" role="img" aria-label="Mapa del Valle de Aburrá con paquetes fallidos, salvados y retornados" />
+      {notice && <div className="map-note" role="status">{notice}</div>}
+    </div>
+  )
 }

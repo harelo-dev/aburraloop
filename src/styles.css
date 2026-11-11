@@ -223,3 +223,10 @@ label.check.consent { background: var(--bg); border: 1px solid var(--line); bord
 .replay .count .bad { color: var(--loss); }
 .replay .hint { grid-column: 1 / -1; margin: 0; }
 @media (max-width: 560px) { .replay { grid-template-columns: 1fr; } .replay .play { width: 100%; } }
+
+.map-wrap { position: relative; }
+.map-note { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 20px); padding: 7px 12px; background: var(--ink); color: #fff; font-size: 13px; border-radius: 4px; pointer-events: none; }
+.legend i.dragdot { background: var(--ink); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--ink); }
+.manual-note { margin: 10px 6px 0; font-size: 13px; color: var(--muted); }
+.linkbtn { font: inherit; padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.linkbtn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }

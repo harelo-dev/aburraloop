@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MapView, type RateCell } from './MapView'
 import { ARC_HOURS, clock, countAt, dayRange } from './replay'
-import type { Params, Result } from './sim/simulate'
+import type { Params, PlaceError, Result } from './sim/simulate'
 
 /** Simulated hours per real second. */
 const SPEED = 1
 
-interface Props { result: Result; params: Params; rateCells?: RateCell[]; overall?: number; showRates?: boolean }
+interface Props { result: Result; params: Params; rateCells?: RateCell[]; overall?: number; showRates?: boolean; onMoveVan?: (index: number, lat: number, lon: number) => PlaceError | null }
 
 /**
  * The map plus a play button for the day. The clock lives here, not in App, so a 60 fps animation
