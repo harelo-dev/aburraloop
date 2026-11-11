@@ -6,8 +6,8 @@ import { Guided } from './Guided'
 import { ScenarioSummary } from './ScenarioSummary'
 import { Levers } from './Levers'
 import type { Report } from './data/ingest'
-import { MapView } from './MapView'
-import { ASSUMPTIONS, defaultParams, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
+import { DayReplay } from './Replay'
+import { ASSUMPTIONS, defaultParams, placeVan, simulate, type Mode, type Objective, type Params, type Placement } from './sim/simulate'
 import { cop, dec } from './format'
 import travel from './data/travel.json'
 
@@ -45,7 +45,7 @@ export function App() {
     })
   }
   const useData = (a: Applied, summary: { used: number; days: number; example?: boolean }) => {
-    setP((o) => ({ ...o, data: a.data, ...a.patch, placement: o.placement === 'trend' && !a.data.exposure ? 'history' : o.placement }))
+    setP((o) => ({ ...o, manualVans: undefined, data: a.data, ...a.patch, placement: o.placement === 'trend' && !a.data.exposure ? 'history' : o.placement }))
     setDataInfo(summary)
     setReport(a.report)
     setShowRates(a.report.rates?.level === 'cell')
@@ -63,13 +63,25 @@ export function App() {
     setCsvOpen(true)
   }
   const clearData = () => {
-    setP((o) => ({ ...o, data: undefined, placement: o.placement === 'trend' ? 'history' : o.placement }))
+    setP((o) => ({ ...o, manualVans: undefined, data: undefined, placement: o.placement === 'trend' ? 'history' : o.placement }))
     setDataInfo(null)
     setReport(null)
     setShowRates(false)
   }
-  const set = <K extends keyof Params>(k: K, v: Params[K]) => setP((o) => ({ ...o, [k]: v }))
+  /** Changing what the vans are or where they may go makes the dragged positions stale, so they are dropped. */
+  const RESETS_VANS: (keyof Params)[] = ['cedi', 'vans', 'mode', 'placement', 'objective', 'minCediMinutes']
+  const set = <K extends keyof Params>(k: K, v: Params[K]) => setP((o) => ({ ...o, [k]: v, ...(RESETS_VANS.includes(k) ? { manualVans: undefined } : {}) }))
   const r = useMemo(() => simulate(p), [p])
+  /** The scenario without dragged vans: the analysis, levers and summary below describe the automatic placement. */
+  const auto = useMemo(() => ({ ...p, manualVans: undefined }), [p])
+  const moveVan = (index: number, lat: number, lon: number) => {
+    const cells = r.vans.map((v) => v.cell)
+    const res = placeVan(p, cells, index, lat, lon)
+    if ('error' in res) return res.error
+    if (res.cells[index] !== cells[index]) setP((o) => ({ ...o, manualVans: res.cells }))
+    return null
+  }
+  const manual = !!p.manualVans && p.manualVans.length === p.vans
   const net = r.net
   const pct = r.failed ? (r.saved / r.failed) * 100 : 0
   const bars = [
@@ -174,17 +186,27 @@ export function App() {
                 <button aria-pressed={showRates} onClick={() => setShowRates(true)}>Tasa de novedad por zona</button>
               </div>
             )}
-            <MapView result={r} params={p} rateCells={report?.rates?.cells} overall={report?.rates?.overall} showRates={showRates} />
+            <DayReplay onMoveVan={p.vans > 0 ? moveVan : undefined} result={r} params={p} rateCells={report?.rates?.cells} overall={report?.rates?.overall} showRates={showRates} />
             <div className="legend">
               <span><i style={{ background: 'var(--accent)' }} />Salvado en calle</span>
               <span><i style={{ background: 'var(--loss)' }} />Retorno forzoso al CEDI</span>
               {p.mode === 'rounds'
                 ? <span><i className="ring" />Moto (centro de su zona)</span>
-                : <span><i className="line" style={{ background: 'var(--loss)', opacity: 0.5 }} />Viaje de peso muerto (línea recta, ilustrativa)</span>}
+                : <>
+                    <span><i className="line" style={{ background: 'var(--accent)' }} />Arco a la van (ilustrativo)</span>
+                    <span><i className="line" style={{ background: 'var(--loss)', opacity: 0.6 }} />Arco al CEDI: viaje de peso muerto (ilustrativo)</span>
+                  </>}
               <span><i className="sq" />Zona que alcanzan las vans</span>
               <span><i className="sq gray" />Sin vans: demasiado cerca del CEDI</span>
+              {p.vans > 0 && !showRates && <span><i className="dragdot" />Arrastra una van para moverla</span>}
               {showRates && <span><i className="grad" />Tasa de novedad: menor → mayor que la general (zonas con 5+ entregas)</span>}
             </div>
+            {manual && (
+              <p className="manual-note" role="status">
+                Moviste las vans a mano. Los análisis de más abajo siguen usando la ubicación automática.{' '}
+                <button type="button" className="linkbtn" onClick={() => set('placement', p.placement)}>Volver a la ubicación automática</button>
+              </p>
+            )}
           </div>
 
           <div className="panel">
@@ -214,7 +236,7 @@ export function App() {
               <div>Operación: <b>{p.mode === 'rounds' ? `la van visita a cada moto a las ${ASSUMPTIONS.amWindow[0]}–${ASSUMPTIONS.amWindow[1]} y ${ASSUMPTIONS.pmWindow[0]}–${ASSUMPTIONS.pmWindow[1]} h, ${ASSUMPTIONS.handoffMinutes} min por visita` : 'intercepta fallos dentro de su alcance'}</b></div>
               <div>Reintento: <b>éxito pleno si llega a la van antes de las {ASSUMPTIONS.attemptFullUntil} h, nulo desde las {ASSUMPTIONS.attemptNoneFrom} h</b></div>
               <div>Van a ≥ <b>{p.minCediMinutes ? `${p.minCediMinutes} min` : '0 (sin límite)'}</b> del CEDI</div>
-              <div>Ubicación de vans: <b>{p.placement === 'zones' ? 'fija por zona' : p.placement === 'history' ? 'según fallos de 10 días previos' : 'según los fallos del día (techo)'} · {OBJECTIVE_LABEL[p.objective].toLowerCase()}</b></div>
+              <div>Ubicación de vans: <b>{manual ? 'la que tú elegiste arrastrándolas' : p.placement === 'zones' ? 'fija por zona' : p.placement === 'history' ? 'según fallos de 10 días previos' : 'según los fallos del día (techo)'} · {OBJECTIVE_LABEL[p.objective].toLowerCase()}</b></div>
             </div>
           </div>
         </section>
@@ -222,11 +244,11 @@ export function App() {
 
       {report?.rates && dataInfo && <Tendency rates={report.rates} days={dataInfo.days} />}
 
-      <Analysis params={p} />
+      <Analysis params={auto} />
 
-      <Levers params={p} report={report} />
+      <Levers params={auto} report={report} />
 
-      <ScenarioSummary params={p} origin={dataInfo ? 'archivo propio' : origin === 'guided' ? 'estimaciones del modo guiado' : 'valores de la demo'} report={report} />
+      <ScenarioSummary params={auto} origin={dataInfo ? 'archivo propio' : origin === 'guided' ? 'estimaciones del modo guiado' : 'valores de la demo'} report={report} />
 
       <details className="privacy">
         <summary>Privacidad: qué pasa con lo que escribes y cargas</summary>

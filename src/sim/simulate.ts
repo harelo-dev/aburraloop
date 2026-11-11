@@ -77,6 +77,8 @@ export interface Params {
   mode: Mode
   /** Rounds mode: the van visits only couriers that have a failure waiting, instead of every courier every round. */
   skipEmptyVisits: boolean
+  /** Cells where the user dragged the vans. Used only while its length equals `vans`; the analysis never sees it. */
+  manualVans?: number[]
   /** When set, failures are drawn from the operation's own data. */
   data?: RealData
   seed: number
@@ -521,7 +523,19 @@ export function vanCells(p: Params, a: Assumptions, incidents: Incident[]): numb
 
 export function simulate(p: Params, a: Assumptions = ASSUMPTIONS): Result {
   const incidents = generateIncidents(p, a, p.seed)
-  return simulateAt(p, a, incidents, vanCells(p, a, incidents))
+  const manual = p.manualVans && p.manualVans.length === p.vans ? p.manualVans : undefined
+  return simulateAt(p, a, incidents, manual ?? vanCells(p, a, incidents))
+}
+
+export type PlaceError = 'outside' | 'near-cedi' | 'taken'
+
+/** Moves van `index` to the cell under a point. Fails, leaving the vans as they were, when the point is off the grid, too near the CEDI, or on another van. */
+export function placeVan(p: Pick<Params, 'cedi' | 'minCediMinutes'>, cells: number[], index: number, lat: number, lon: number): { cells: number[] } | { error: PlaceError } {
+  const cell = locateCell(lat, lon)
+  if (cell === null) return { error: 'outside' }
+  if (cells.some((c, i) => i !== index && c === cell)) return { error: 'taken' }
+  if (!allowedCells(p)[cell]) return { error: 'near-cedi' }
+  return { cells: cells.map((c, i) => (i === index ? cell : c)) }
 }
 
 /** Runs the day with the vans on the given cells. */

@@ -25,6 +25,14 @@ La van puede operar de dos formas: **interceptar** los fallos en la calle, o **r
 
 Los parámetros de entrada son el CEDI base, el volumen diario (150–1.200), la flota (5–45 motos), la tasa de novedad (5–30%) y de 0 a 3 mini-vans. Además se ajustan el tiempo máximo de viaje de la van, la distancia mínima de la van al CEDI, el éxito del segundo intento, qué parte del margen se pierde si un paquete vuelve al CEDI y el costo del desvío de la moto.
 
+## Reproducir el día
+
+Debajo del mapa, un botón reproduce el día de principio a fin: cada fallo aparece como un pulso a su hora y un arco lo lleva a la van (verde) si se rescató, o al CEDI (rojo) si no. Una barra permite moverse por el día y un contador muestra cuántos fallos, salvados y devueltos van hasta esa hora. Solo **muestra** lo que la simulación ya decidió: no cambia ningún resultado, y los arcos son ilustrativos, no rutas. Con «reducir movimiento» activado en el sistema, avanza por pasos en vez de animarse. Se dibuja con three.js dentro del propio mapa, que se carga solo cuando el mapa ya está listo.
+
+## Mover las vans a mano
+
+Con una o más vans, arrástralas en el mapa: la van salta de celda en celda y la zona que alcanza, los rescates y el neto se recalculan en cada paso. Una van no puede ir fuera del valle, sobre otra van ni en la zona gris cercana al CEDI (el mapa avisa por qué). Los análisis de más abajo y el resumen del escenario siguen describiendo la ubicación automática, y un botón vuelve a ella. Cambiar el CEDI, el número de vans, el modo o el criterio de ubicación también descarta las posiciones arrastradas. Arrastrar necesita puntero o pantalla táctil; con teclado, la lista «Dónde van las vans» ofrece las ubicaciones automáticas.
+
 ## Modo guiado
 
 Para quien no tiene un archivo a mano: cinco preguntas (bodega, volumen y motos, tasa de novedad, causas de los fallos, costos) y el resultado en palabras: cuánto cuestan tus novedades, cuánto ahorraría bajar un punto la tasa de novedad, y cuál es la mejor configuración de van, con un rango. El rango sale de mover dos de las cifras menos seguras, la tasa de novedad y el éxito del reintento, más si dices que son estimaciones que si las mediste. Al final se puede llevar todo al simulador completo para explorarlo.
@@ -98,7 +106,7 @@ Requiere Node 20 o superior.
 
 ## Stack
 
-Vite, React, TypeScript, MapLibre GL, Vitest.
+Vite, React, TypeScript, MapLibre GL, three.js (la reproducción del día), Vitest.
 
 ## Licencia
 
